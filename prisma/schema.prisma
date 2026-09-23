@@ -207,8 +207,8 @@ model AuditLog {
   ip        String?
   createdAt DateTime @default(now())
 
-  admin User? @relation(fields: [adminId], references: [id])
-  user  User? @relation(fields: [userId], references: [id])
+  admin User? @relation("AuditLogAdmin", fields: [adminId], references: [id])
+  user  User? @relation("AuditLogUser", fields: [userId], references: [id])
 
   @@index([userId, createdAt])
   @@map("audit_logs")
