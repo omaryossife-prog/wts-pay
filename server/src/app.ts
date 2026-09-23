@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import { config } from "./config.js";
 import routes from "./routes/index.js";
 import { apiLimiter } from "./middleware/rateLimit.middleware.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
@@ -9,6 +8,32 @@ export function createApp() {
   const app = express();
 
   app.set("trust proxy", 1);
+
+  const allowedOrigin = "https://wts-pay-1.pages.dev";
+
+  // CORS
+  app.use(
+    cors({
+      origin: (origin, cb) => {
+        if (!origin || origin === allowedOrigin) {
+          return cb(null, true);
+        }
+
+        return cb(new Error("Not allowed by CORS"));
+      },
+      credentials: true,
+      methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Idempotency-Key",
+      ],
+    })
+  );
+
+  // Explicitly handle CORS preflight requests.
+  app.options("*", cors());
 
   // Cloudflare Workers compatible JSON parser.
   // Avoid express.json()/body-parser because it pulls Node stream
@@ -32,6 +57,7 @@ export function createApp() {
 
         req.on("data", (chunk) => {
           data += chunk;
+
           if (data.length > 256 * 1024) {
             reject(new Error("Request body too large"));
           }
@@ -48,20 +74,7 @@ export function createApp() {
     }
   });
 
-
-  app.use(
-    cors({
-      origin: (origin, cb) => {
-        if (!origin || origin === config.clientOrigin) {
-          return cb(null, true);
-        }
-
-        return cb(new Error("Not allowed by CORS"));
-      },
-      credentials: true,
-    })
-  );
-
+  // CSRF protection
   app.use((req, res, next) => {
     if (
       !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
@@ -71,7 +84,9 @@ export function createApp() {
       const hdr = req.headers["x-requested-with"];
 
       if (hdr !== "XMLHttpRequest") {
-        return res.status(403).json({ error: "Missing CSRF header" });
+        return res.status(403).json({
+          error: "Missing CSRF header",
+        });
       }
     }
 
@@ -79,6 +94,7 @@ export function createApp() {
   });
 
   app.use("/api", apiLimiter, routes);
+
   app.use(notFound);
   app.use(errorHandler);
 
