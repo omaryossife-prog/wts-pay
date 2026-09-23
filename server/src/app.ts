@@ -48,7 +48,6 @@ export function createApp() {
     }
   });
 
-  app.use(cookieParser());
 
   app.use(
     cors({
