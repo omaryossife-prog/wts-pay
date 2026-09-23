@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 function req(name: string, fallback = ""): string {
   const v = process.env[name];
   if (v === undefined || v === "") {
