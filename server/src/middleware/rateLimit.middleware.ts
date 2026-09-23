@@ -1,25 +1,9 @@
-import rateLimit from "express-rate-limit";
+import type { RequestHandler } from "express";
 
-export const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many requests, slow down." },
-});
+const passThrough: RequestHandler = (_req, _res, next) => {
+  next();
+};
 
-export const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many attempts. Try again later." },
-});
-
-export const transferLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many transfer attempts. Try again later." },
-});
+export const apiLimiter = passThrough;
+export const authLimiter = passThrough;
+export const transferLimiter = passThrough;
