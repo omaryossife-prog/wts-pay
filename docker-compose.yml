@@ -1,0 +1,16 @@
+version: "3.9"
+# Local development database only. Production uses Supabase.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: wtspay
+    ports:
+      - "5432:5432"
+    volumes:
+      - wtspay_pgdata:/var/lib/postgresql/data
+volumes:
+  wtspay_pgdata:
