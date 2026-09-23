@@ -116,7 +116,8 @@ model User {
   receivedTransactions Transaction[] @relation("ReceivedTransactions")
   referralsMade        Referral[]    @relation("Referrer")
   referredBy           Referral?     @relation("Referred")
-  auditLogs            AuditLog[]
+  auditLogsAsAdmin AuditLog[] @relation("AuditLogAdmin")
+  auditLogsAsUser  AuditLog[] @relation("AuditLogUser")
   authorizationsSent   TransactionAuthorization[] @relation("AuthSender")
   authorizationsRecv   TransactionAuthorization[] @relation("AuthRecipient")
 
