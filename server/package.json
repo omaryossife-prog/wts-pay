@@ -13,6 +13,7 @@
     "seed": "tsx ../prisma/seed.ts"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^6.19.0",
     "@prisma/client": "^6.19.0",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
