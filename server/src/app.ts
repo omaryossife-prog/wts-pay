@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import cookieParser from "cookie-parser";
 import { config } from "./config.js";
 import routes from "./routes/index.js";
 import { apiLimiter } from "./middleware/rateLimit.middleware.js";
