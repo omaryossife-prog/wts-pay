@@ -1,12 +1,9 @@
 import { PrismaClient } from "../generated/prisma/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-export function createPrisma(databaseUrl: string) {
-  const adapter = new PrismaPg({
-    connectionString: databaseUrl,
-  });
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL!,
+});
 
-  return new PrismaClient({ adapter });
-}
-
+export const prisma = new PrismaClient({ adapter });
 export type Db = PrismaClient | Prisma.TransactionClient;
