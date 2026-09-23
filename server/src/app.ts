@@ -10,34 +10,79 @@ export function createApp() {
   const app = express();
 
   app.set("trust proxy", 1);
-  app.use(express.json({ limit: "256kb" }));
+
+  // Cloudflare Workers compatible JSON parser.
+  // Avoid express.json()/body-parser because it pulls Node stream
+  // dependencies that are not fully compatible with the Workers runtime.
+  app.use(async (req, res, next) => {
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+      return next();
+    }
+
+    const contentType = req.headers["content-type"] ?? "";
+
+    if (!contentType.includes("application/json")) {
+      return next();
+    }
+
+    try {
+      const raw = await new Promise<string>((resolve, reject) => {
+        let data = "";
+
+        req.setEncoding("utf8");
+
+        req.on("data", (chunk) => {
+          data += chunk;
+          if (data.length > 256 * 1024) {
+            reject(new Error("Request body too large"));
+          }
+        });
+
+        req.on("end", () => resolve(data));
+        req.on("error", reject);
+      });
+
+      req.body = raw ? JSON.parse(raw) : {};
+      next();
+    } catch {
+      res.status(400).json({ error: "Invalid JSON body" });
+    }
+  });
+
   app.use(cookieParser());
 
-  // Secure CORS: only the known frontend origin, credentials allowed for cookies
   app.use(
     cors({
       origin: (origin, cb) => {
-        if (!origin || origin === config.clientOrigin) return cb(null, true);
+        if (!origin || origin === config.clientOrigin) {
+          return cb(null, true);
+        }
+
         return cb(new Error("Not allowed by CORS"));
       },
       credentials: true,
     })
   );
 
-  // Basic CSRF posture: require a custom header on mutating requests (denies
-  // simple cross-site form posts; JWT is also not auto-sent cross-origin).
-  app.use((req, _res, next) => {
-    if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+  app.use((req, res, next) => {
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      !req.path.startsWith("/api/whatsapp/webhook") &&
+      !req.path.startsWith("/api/whatsapp/flows")
+    ) {
       const hdr = req.headers["x-requested-with"];
-      if (hdr !== "XMLHttpRequest" && !req.path.startsWith("/api/whatsapp/webhook") && !req.path.startsWith("/api/whatsapp/flows")) {
-        return _res.status(403).json({ error: "Missing CSRF header" });
+
+      if (hdr !== "XMLHttpRequest") {
+        return res.status(403).json({ error: "Missing CSRF header" });
       }
     }
+
     next();
   });
 
   app.use("/api", apiLimiter, routes);
   app.use(notFound);
   app.use(errorHandler);
+
   return app;
 }
