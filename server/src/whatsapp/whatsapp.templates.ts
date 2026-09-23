@@ -116,3 +116,4 @@ export function approvalMessage(wtsId: string, walletId: string, balance: number
     `Next step: create your 6-digit WTS transaction PIN.`
   );
 }
+export const NUMBER_NO_TEXT = "No";
