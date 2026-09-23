@@ -32,9 +32,6 @@ export function createApp() {
     })
   );
 
-  // Explicitly handle CORS preflight requests.
-  app.options("*", cors());
-
   // Cloudflare Workers compatible JSON parser.
   // Avoid express.json()/body-parser because it pulls Node stream
   // dependencies that are not fully compatible with the Workers runtime.
