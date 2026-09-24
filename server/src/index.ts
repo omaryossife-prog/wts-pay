@@ -117,6 +117,31 @@ export default {
         }
       }
 
+      if (url.pathname === "/__prismatest") {
+        try {
+          if (!dbInitialized) {
+            initDatabase(env.DATABASE_URL);
+            dbInitialized = true;
+          }
+          const { prisma } = await import("./utils/prisma.js");
+          const userCount = await prisma.user.count();
+          return Response.json(
+            { ok: true, userCount },
+            { headers: cors }
+          );
+        } catch (e: any) {
+          console.error("__prismatest failed:", e?.message ?? e);
+          return Response.json(
+            {
+              ok: false,
+              error: String(e?.message ?? e),
+              stack: String(e?.stack ?? "").slice(0, 2000),
+            },
+            { status: 500, headers: cors }
+          );
+        }
+      }
+
       // ── 3) تهيئة قاعدة البيانات مرة واحدة ──
       if (!dbInitialized) {
         initDatabase(env.DATABASE_URL);
