@@ -12,6 +12,12 @@
       "globs": [
         "**/*.js"
       ]
+    },
+    {
+      "type": "CompiledWasm",
+      "globs": [
+        "**/*.wasm"
+      ]
     }
   ]
 }
