@@ -16,8 +16,10 @@
     {
       "type": "CompiledWasm",
       "globs": [
-        "**/*.wasm"
-      ]
+        "**/*.wasm",
+        "**/*.wasm?module"
+      ],
+      "fallthrough": true
     }
   ]
 }
