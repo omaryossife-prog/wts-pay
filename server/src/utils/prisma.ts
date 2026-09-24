@@ -4,7 +4,11 @@ import { PrismaPg } from "@prisma/adapter-pg";
 let _prisma: PrismaClient | null = null;
 let _databaseUrl: string | null = null;
 
-// يُستدعى مرة واحدة من الـ Worker fetch handler
+// يُستدعى مرة في أول كل request من الـ Worker fetch handler.
+// مهم: بنمسح الـ client القديم (_prisma = null) في كل مرة، لأن
+// Cloudflare Workers بيقفل الاتصال (socket) في آخر كل request —
+// لو سبنا نفس الـ client القديم واستخدمناه في request جديد،
+// الطلب بيفضل معلّق للأبد (hang) لحد ما Cloudflare يلغيه.
 export function initDatabase(databaseUrl: string | undefined) {
   if (!databaseUrl) {
     throw new Error(
@@ -13,12 +17,11 @@ export function initDatabase(databaseUrl: string | undefined) {
     );
   }
   _databaseUrl = databaseUrl;
+  _prisma = null;
 }
 
 // ملحوظة: من غير ما نحدد ssl يدوي — مكتبة pg بتقرأ sslmode
 // من الرابط نفسه (?sslmode=require) وتظبط SSL صح لوحدها.
-// تحديد ssl يدوي هنا كان هو سبب "Connection terminated unexpectedly"
-// جوا بيئة Cloudflare Workers.
 function getClient(): PrismaClient {
   if (!_prisma) {
     if (!_databaseUrl) {
