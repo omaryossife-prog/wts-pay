@@ -4,6 +4,7 @@ import { prisma } from "../utils/prisma.js";
 import { transfer } from "../services/wallet.service.js";
 import { evaluateReferralEligibility } from "../services/referral.service.js";
 import { computeFee } from "../services/fee.service.js";
+import { HttpError } from "../middleware/errorHandler.js";
 
 export const transferSchema = z.object({
   recipientPhone: z.string().min(8).max(20),
@@ -25,6 +26,9 @@ export async function getWalletController(req: Request, res: Response) {
       transfersEnabled: true,
     },
   });
+  if (!user) {
+    throw new HttpError(404, "User not found");
+  }
   res.json({ user, notice: "Demo Balance — No Cash Value. Demo credits cannot be withdrawn or exchanged for real money." });
 }
 
