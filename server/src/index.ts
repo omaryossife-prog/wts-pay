@@ -57,7 +57,9 @@ function jsonError(status: number, message: string, headers: Record<string, stri
   });
 }
 
-let dbInitialized = false;
+// ملحوظة: مفيش flag هنا يمنع التهيئة تتكرر — initDatabase() لازم
+// تتنادى في كل request عشان تعمل client جديد لقاعدة البيانات،
+// لأن Cloudflare Workers بيقفل اتصال الـ request اللي فات.
 
 export default {
   async fetch(
@@ -119,10 +121,7 @@ export default {
 
       if (url.pathname === "/__prismatest") {
         try {
-          if (!dbInitialized) {
-            initDatabase(env.DATABASE_URL);
-            dbInitialized = true;
-          }
+          initDatabase(env.DATABASE_URL);
           const { prisma } = await import("./utils/prisma.js");
           const userCount = await prisma.user.count();
           return Response.json(
@@ -142,11 +141,8 @@ export default {
         }
       }
 
-      // ── 3) تهيئة قاعدة البيانات مرة واحدة ──
-      if (!dbInitialized) {
-        initDatabase(env.DATABASE_URL);
-        dbInitialized = true;
-      }
+      // ── 3) تهيئة قاعدة البيانات — من غير flag، كل request بياخد client جديد ──
+      initDatabase(env.DATABASE_URL);
 
       // ── 4) ناخد رد Express ونختمه بـ CORS headers مهما كان نوعه ──
       const response = await handler.fetch(request, env, ctx);
