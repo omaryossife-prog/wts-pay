@@ -2,6 +2,17 @@ import { createApp } from "./app.js";
 import { initDatabase } from "./utils/prisma.js";
 import { httpServerHandler } from "cloudflare:node";
 
+// مهم جداً في Workers: أي خطأ مش متلتقط (زي أخطاء sockets بتاعة pg
+// أو unhandled promise rejection) بيقع العزل (isolate) كله →
+// Cloudflare بيرجع 500 فاضي من غير CORS headers.
+// التسجيل هنا بيمنع الـ crash ويسجل الخطأ بدل ما يموت الـ request.
+process.on("uncaughtException", (err) => {
+  console.error("uncaughtException:", err?.message ?? err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("unhandledRejection:", reason);
+});
+
 const app = createApp();
 app.listen(4000);
 
