@@ -7,11 +7,24 @@ app.listen(4000);
 
 const handler = httpServerHandler({ port: 4000 });
 
+const ALLOWED_ORIGIN = "https://wts-pay-1.pages.dev";
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+  "Access-Control-Allow-Credentials": "true",
+  "Access-Control-Allow-Methods": "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Requested-With,Idempotency-Key",
+  "Access-Control-Max-Age": "86400",
+};
+
 export default {
   async fetch(request: Request, env: Record<string, string>, ctx: ExecutionContext) {
-    const url = new URL(request.url);
+    // ── 1) الرد على preflight فوراً من غير ما ندخل Express ──
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
 
-    // ── أداة تشخيص مؤقتة ──
+    // ── 2) باقي أدوات التشخيص المؤقتة ──
+    const url = new URL(request.url);
     if (url.pathname === "/__dbdebug") {
       const dbUrl = env.DATABASE_URL ?? "";
       const afterProtocol = dbUrl.includes("://") ? dbUrl.split("://")[1] : "";
@@ -20,14 +33,11 @@ export default {
       return Response.json({
         present: dbUrl.length > 0,
         length: dbUrl.length,
-        startsWithQuote: dbUrl.startsWith('"') || dbUrl.startsWith("'"),
-        hasWhitespace: /\s/.test(dbUrl),
         user: user || "MISSING",
         passwordLength: passParts.join(":").length,
         host: dbUrl.includes("@") ? dbUrl.split("@")[1].split("/")[0] : "MISSING",
       });
     }
-
     if (url.pathname === "/__dbtest") {
       try {
         const pg = await import("pg");
@@ -35,14 +45,25 @@ export default {
         await client.connect();
         const r = await client.query("SELECT 1 AS ok");
         await client.end();
-        return Response.json({ ok: true, result: r.rows });
+        return Response.json({ ok: true, result: r.rows }, { headers: CORS_HEADERS });
       } catch (e: any) {
-        return Response.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
+        return Response.json({ ok: false, error: String(e?.message ?? e) }, { status: 500, headers: CORS_HEADERS });
       }
     }
-    // ── نهاية أداة التشخيص ──
+    // ── نهاية أدوات التشخيص ──
 
     initDatabase(env.DATABASE_URL);
-    return handler.fetch(request, env, ctx);
+
+    // ── 3) ناخد رد Express ونختمه بـ CORS headers مهما كان نوعه ──
+    const response = await handler.fetch(request, env, ctx);
+    const headers = new Headers(response.headers);
+    for (const [k, v] of Object.entries(CORS_HEADERS)) {
+      headers.set(k, v);
+    }
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
   },
 };
