@@ -1,0 +1,259 @@
+generator client {
+  provider   = "prisma-client"
+  output     = "../server/src/generated/prisma"
+  engineType = "client"
+  runtime    = "cloudflare"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  FROZEN
+}
+
+enum VerificationStatus {
+  UNVERIFIED        // first contact, registration not completed
+  PENDING_REVIEW    // ID + face video submitted, awaiting admin decision
+  VERIFIED          // approved, wallet active
+  REJECTED          // admin rejected
+}
+
+enum TransactionType {
+  TRANSFER
+  SIGNUP_REWARD
+  REFERRAL_REWARD
+  ADMIN_ADJUSTMENT
+  MANUAL_ADJUSTMENT
+  DEPOSIT
+  WITHDRAWAL
+}
+
+enum TransactionStatus {
+  COMPLETED
+  PENDING
+  FAILED
+  REVERSED
+}
+
+enum ReferralStatus {
+  PENDING
+  ELIGIBLE
+  REWARDED
+  REJECTED
+}
+
+enum AuthorizationStatus {
+  PENDING
+  USED
+  EXPIRED
+  INVALIDATED
+}
+
+enum TransferRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELED
+  EXPIRED
+}
+
+model User {
+  id            String        @id @default(uuid())
+  phone         String        @unique
+  username      String
+  passwordHash  String
+  role          Role          @default(USER)
+  status        AccountStatus @default(ACTIVE)
+  demoBalance   Int           @default(0)
+
+  // ---- Permanent WTS identity (never the WhatsApp display name) ----
+  wtsId         String?       @unique // WTS-000123 (issued at admin approval)
+  walletId      String?       @unique // WALLET-000123 (created at approval)
+  fullName      String?       // four-part legal name, validated at registration
+
+  // ---- WhatsApp identity (official Cloud API), authoritative channel identity ----
+  waId          String?       @unique // stable identity from the API webhook (contacts[].wa_id)
+  whatsappPhone String?       @unique
+
+  // ---- Verification lifecycle (media stays in WhatsApp; metadata only here) ----
+  verificationStatus    VerificationStatus @default(UNVERIFIED)
+  idSubmitted           Boolean   @default(false)
+  idReceivedAt          DateTime?
+  faceVideoSubmitted    Boolean   @default(false)
+  faceVideoReceivedAt   DateTime?
+  reviewedAt            DateTime?
+  reviewedById          String?
+  rejectionReason       String?
+
+  // ---- WTS transaction PIN (separate from any password; hash only) ----
+  pinHash          String?
+  pinFailedAttempts Int      @default(0)
+  pinLockedUntil   DateTime?
+
+  // ---- Per-user transfer switch (admin controllable) ----
+  transfersEnabled Boolean    @default(true)
+
+  referralCode  String        @unique
+  referredById  String?
+  referralCount Int           @default(0)
+  totalEarned   Int           @default(0)
+
+  // Sensitive identity fields (encrypt at application level before storing)
+  nationalIdEnc String?
+
+  // WhatsApp conversation state
+  whatsappUserId           String?
+  lastWhatsappMessageId    String?
+  whatsappSessionState     String?
+  whatsappSessionData      Json?
+  whatsappSessionExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sentTransactions     Transaction[] @relation("SentTransactions")
+  receivedTransactions Transaction[] @relation("ReceivedTransactions")
+  referralsMade        Referral[]    @relation("Referrer")
+  referredBy           Referral?     @relation("Referred")
+  auditLogsAsAdmin AuditLog[] @relation("AuditLogAdmin")
+  auditLogsAsUser  AuditLog[] @relation("AuditLogUser")
+  authorizationsSent   TransactionAuthorization[] @relation("AuthSender")
+  authorizationsRecv   TransactionAuthorization[] @relation("AuthRecipient")
+  requestsMade         TransferRequest[] @relation("RequestMadeBy")
+  requestsReceived     TransferRequest[] @relation("RequestSentTo")
+
+  @@map("users")
+}
+
+model Transaction {
+  id             String            @id @default(uuid())
+  senderId       String?
+  receiverId     String?
+  amount         Int
+  fee            Int               @default(0)
+  totalDebit     Int
+  status         TransactionStatus @default(COMPLETED)
+  type           TransactionType
+  idempotencyKey String            @unique
+  description    String?
+  balanceBefore  Int?              // for MANUAL_ADJUSTMENT auditability
+  balanceAfter   Int?
+  createdAt      DateTime          @default(now())
+
+  sender   User? @relation("SentTransactions", fields: [senderId], references: [id])
+  receiver User? @relation("ReceivedTransactions", fields: [receiverId], references: [id])
+
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
+  @@map("transactions")
+}
+
+// One-time, transaction-bound authorization (PIN-confirmed) for transfers.
+// The wallet transfer itself executes with transferIdempotencyKey, so an
+// authorization can never execute twice.
+model TransactionAuthorization {
+  id                     String              @id @default(uuid())
+  authorizationId        String              @unique
+  senderId               String
+  recipientId            String
+  recipientPhone         String
+  recipientWtsId         String?
+  amount                 Int
+  fee                    Int
+  total                  Int
+  transferIdempotencyKey String              @unique
+  status                 AuthorizationStatus @default(PENDING)
+  createdAt              DateTime            @default(now())
+  expiresAt              DateTime
+  usedAt                 DateTime?
+
+  sender   User @relation("AuthSender", fields: [senderId], references: [id])
+  recipient User @relation("AuthRecipient", fields: [recipientId], references: [id])
+
+  @@index([senderId, status])
+  @@map("transaction_authorizations")
+}
+
+model Referral {
+  id         String         @id @default(uuid())
+  referrerId String
+  referredId String         @unique
+  status     ReferralStatus @default(PENDING)
+  rewardedAt DateTime?
+  createdAt  DateTime       @default(now())
+
+  referrer User @relation("Referrer", fields: [referrerId], references: [id])
+  referred User @relation("Referred", fields: [referredId], references: [id])
+
+  @@index([referrerId])
+  @@map("referrals")
+}
+
+// طلب تحويل: مستخدم بيطلب من مستخدم تاني يحوّله مبلغ معيّن.
+// لو المطلوب منه (payer) وافق، بتتفعل نفس شاشة إدخال الـ PIN، وبعد
+// التأكيد بينفّذ تحويل حقيقي من الـ payer للـ requester بالمبلغ ده.
+model TransferRequest {
+  id             String                 @id @default(uuid())
+  requesterId    String // اللي طالب الفلوس (هيستلم لو تم القبول)
+  payerId        String // المطلوب منه يحول (هيبعت لو وافق)
+  amount         Int
+  description    String?
+  status         TransferRequestStatus @default(PENDING)
+  idempotencyKey String                 @unique
+  transactionId  String? // العملية الناتجة بعد القبول
+  createdAt      DateTime               @default(now())
+  respondedAt    DateTime?
+  expiresAt      DateTime
+
+  requester User @relation("RequestMadeBy", fields: [requesterId], references: [id])
+  payer     User @relation("RequestSentTo", fields: [payerId], references: [id])
+
+  @@index([payerId, status])
+  @@index([requesterId, status])
+  @@map("transfer_requests")
+}
+
+// Key-value store for admin-configurable settings (fees, rewards, campaigns,
+// PIN policy, limits, maintenance mode, ID sequences)
+model Config {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("config")
+}
+
+// Append-only audit trail for admin actions and sensitive operations
+model AuditLog {
+  id        String   @id @default(uuid())
+  adminId   String?
+  userId    String?
+  action    String
+  detail    Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  admin User? @relation("AuditLogAdmin", fields: [adminId], references: [id])
+  user  User? @relation("AuditLogUser", fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+// Deduplication of processed WhatsApp webhook messages (Meta may retry)
+model ProcessedMessage {
+  id          String   @id // whatsapp message id (wamid.xxx)
+  processedAt DateTime @default(now())
+
+  @@map("processed_messages")
+}
