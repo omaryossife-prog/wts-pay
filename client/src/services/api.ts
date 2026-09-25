@@ -65,7 +65,7 @@ export const api = {
       referralCode?: string;
     }
   ) =>
-    request<{ user: any; token: string }>("/api/auth/register", {
+    request<{ user: any; pendingReview?: boolean; message?: string }>("/api/auth/register", {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -224,6 +224,36 @@ export const api = {
     request<{ items: Transaction[] }>(
       `/api/admin/transactions${type ? `?type=${type}` : ""}`
     ),
+
+  // ── طلبات التحويل (Request Money) ──────────────────────────────────
+  createRequest: (data: { payerPhone: string; amount: number; description?: string }) =>
+    request<{ request: TransferRequest }>("/api/requests", {
+      method: "POST",
+      headers: { "Idempotency-Key": uuid() },
+      body: JSON.stringify(data),
+    }),
+
+  incomingRequests: () => request<{ items: TransferRequest[] }>("/api/requests/incoming"),
+
+  outgoingRequests: () => request<{ items: TransferRequest[] }>("/api/requests/outgoing"),
+
+  rejectRequest: (id: string) =>
+    request<{ request: TransferRequest }>(`/api/requests/${id}/reject`, { method: "POST" }),
+
+  cancelRequest: (id: string) =>
+    request<{ request: TransferRequest }>(`/api/requests/${id}/cancel`, { method: "POST" }),
+
+  acceptRequest: (id: string, pin: string) =>
+    request<{ request: TransferRequest; transaction: Transaction }>(`/api/requests/${id}/accept`, {
+      method: "POST",
+      body: JSON.stringify({ pin }),
+    }),
+
+  setPin: (data: { password: string; pin: string }) =>
+    request<{ ok: boolean }>("/api/wallet/pin", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };
 
 import type {
@@ -233,4 +263,5 @@ import type {
   AdminStats,
   ConfigBundle,
   PendingVerification,
+  TransferRequest,
 } from "../types";
