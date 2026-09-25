@@ -1,11 +1,3 @@
-// ---------------------------------------------------------------------------
-// Meta WhatsApp Cloud API webhook endpoints.
-// GET  /api/whatsapp/webhook  - verification handshake
-// POST /api/whatsapp/webhook  - incoming events (deduplicated by message id)
-// We read contacts[].wa_id (stable identity) and never trust profile names
-// as identifiers. Media (ID photos, face videos) is NOT fetched or stored -
-// only message metadata is recorded.
-// ---------------------------------------------------------------------------
 import { Request, Response } from "express";
 import { handleIncomingMessage } from "./whatsapp.service";
 import { prisma } from "../utils/prisma";
@@ -39,9 +31,30 @@ interface WaWebhookBody {
   }>;
 }
 
+// دالة الـ Verification Handshake القادمة من Meta (GET)
+export async function verifyWebhook(req: Request, res: Response) {
+  try {
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+
+    const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || "MY_VERIFY_TOKEN";
+
+    if (mode === "subscribe" && token === verifyToken) {
+      console.log("--> Webhook verified successfully!");
+      return res.status(200).send(challenge);
+    }
+
+    return res.status(403).send("Forbidden");
+  } catch (error) {
+    console.error("--> Error in verifyWebhook:", error);
+    return res.status(500).send("Internal Server Error");
+  }
+}
+
+// دالة استقبال الرسائل القادمة من واتساب (POST)
 export async function receiveWebhook(req: Request, res: Response) {
   try {
-    // 1. طباعة الـ Payload القادم من واتساب لـ Cloudflare Logs
     console.log("--> Webhook Received Payload:", JSON.stringify(req.body));
 
     const body = req.body as WaWebhookBody;
@@ -77,7 +90,6 @@ export async function receiveWebhook(req: Request, res: Response) {
             listId: m.interactive?.list_reply?.id,
           };
 
-          // 2. انتظار تنفيذ معالجة الرسالة والرد بـ await
           try {
             console.log("--> Executing handleIncomingMessage...");
             await handleIncomingMessage(incoming);
@@ -89,7 +101,6 @@ export async function receiveWebhook(req: Request, res: Response) {
       }
     }
 
-    // 3. إرجاع الاستجابة في النهاية لضمان عدم إغلاق الـ Worker قبل معالجة الرد
     return res.status(200).send("EVENT_RECEIVED");
   } catch (error) {
     console.error("--> Webhook global error:", error);
