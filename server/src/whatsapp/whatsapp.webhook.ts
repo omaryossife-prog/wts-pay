@@ -8,7 +8,6 @@
 // ---------------------------------------------------------------------------
 import { Request, Response } from "express";
 import { handleIncomingMessage } from "./whatsapp.service";
-import { logger } from "../utils/logger";
 import { prisma } from "../lib/prisma";
 
 interface WaWebhookBody {
@@ -42,6 +41,9 @@ interface WaWebhookBody {
 
 export async function receiveWebhook(req: Request, res: Response) {
   try {
+    // 1. طباعة الـ Payload القادم من واتساب لـ Cloudflare Logs
+    console.log("--> Webhook Received Payload:", JSON.stringify(req.body));
+
     const body = req.body as WaWebhookBody;
 
     for (const entry of body.entry ?? []) {
@@ -49,18 +51,14 @@ export async function receiveWebhook(req: Request, res: Response) {
         const value = change.value;
         if (!value) continue;
 
-        // سجل تحديثات حالة الرسائل (تسليم/قراءة)
-        for (const status of value.statuses ?? []) {
-          logger.info("WA status update:", status);
-        }
-
-        // معالجة الرسائل القادمة
         for (const m of value.messages ?? []) {
-          // منع تكرار معالجة الرسالة نفسها (Idempotency)
+          console.log("--> Incoming Message:", m.from, "| Text:", m.text?.body);
+
+          // منع التكرار
           try {
             await prisma.processedMessage.create({ data: { id: m.id } });
           } catch {
-            logger.warn("Duplicate WhatsApp message ignored:", m.id);
+            console.log("--> Message already processed, skipping:", m.id);
             continue;
           }
 
@@ -79,29 +77,22 @@ export async function receiveWebhook(req: Request, res: Response) {
             listId: m.interactive?.list_reply?.id,
           };
 
-          if (m.interactive?.type === "nfm_reply" && m.interactive.nfm_reply?.response_json) {
-            try {
-              const flowResp = JSON.parse(m.interactive.nfm_reply.response_json);
-              if (flowResp?.pin) incoming.text = String(flowResp.pin);
-            } catch {
-              /* ignore flow response error */
-            }
-          }
-
-          // انتظار تنفيذ الرد وإرساله عبر API قبل إنهاء الدالة
+          // 2. انتظار تنفيذ معالجة الرسالة والرد بـ await
           try {
+            console.log("--> Executing handleIncomingMessage...");
             await handleIncomingMessage(incoming);
+            console.log("--> Reply sent successfully!");
           } catch (err) {
-            logger.error("WhatsApp handler error:", err);
+            console.error("--> Error inside handleIncomingMessage:", err);
           }
         }
       }
     }
 
-    // إرجاع 200 OK بعد اكتمال المعالجة بالكامل
+    // 3. إرجاع الاستجابة في النهاية لضمان عدم إغلاق الـ Worker قبل معالجة الرد
     return res.status(200).send("EVENT_RECEIVED");
   } catch (error) {
-    logger.error("Webhook processing error:", error);
+    console.error("--> Webhook global error:", error);
     return res.status(200).send("EVENT_RECEIVED");
   }
 }
