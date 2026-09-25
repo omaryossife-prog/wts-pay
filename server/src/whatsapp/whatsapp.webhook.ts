@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { handleIncomingMessage } from "./whatsapp.service";
+import { handleIncomingMessage } from "./whatsapp.handler";
 import { prisma } from "../utils/prisma";
 
 interface WaWebhookBody {
