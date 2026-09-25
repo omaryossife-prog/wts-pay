@@ -71,7 +71,17 @@ export function flowMessagePayload(to: string, flowId: string, flowToken: string
       body: { text: body },
       action: {
         name: "flow",
-        parameters: { flow_id: flowId, flow_token: flowToken, flow_cta: buttonLabel.slice(0, 20) },
+        parameters: {
+          flow_message_version: "3",
+          flow_token: flowToken,
+          flow_id: flowId,
+          flow_cta: buttonLabel.slice(0, 20),
+          flow_action: "navigate",
+          mode: "draft",
+          flow_action_payload: {
+            screen: "INIT",
+          },
+        },
       },
     },
   };
