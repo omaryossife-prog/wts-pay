@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 import { Request, Response } from "express";
 import { handleIncomingMessage } from "./whatsapp.service";
-import { prisma } from "../lib/prisma";
+import { prisma } from "../prisma";
 
 interface WaWebhookBody {
   object?: string;
