@@ -31,7 +31,7 @@ export default function Login() {
         {error && <div className="error">{error}</div>}
         <form onSubmit={submit}>
           <div className="field">
-            <label>Phone number</label>
+            <label>WhatsApp number</label>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+2010xxxxxxx" required />
           </div>
           <div className="field">

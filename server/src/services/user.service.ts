@@ -1,11 +1,10 @@
 import bcrypt from "bcryptjs";
 import type { Db } from "../utils/prisma.js";
 import { makeReferralCode, handleSignup } from "./referral.service.js";
-import { issueWtsIdentity } from "./registration.service.js";
 import { logger } from "../utils/logger.js";
 
 export class AuthError extends Error {
-  code: "PHONE_TAKEN" | "INVALID_CREDENTIALS" | "VALIDATION" = "VALIDATION";
+  code: "PHONE_TAKEN" | "INVALID_CREDENTIALS" | "VALIDATION" | "PENDING_REVIEW" | "REJECTED" = "VALIDATION";
   constructor(code: AuthError["code"], message: string) {
     super(message);
     this.code = code;
@@ -39,8 +38,8 @@ export async function register(db: Db, input: RegisterInput) {
       if (!clash) break;
       code = makeReferralCode(phone) + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
     }
-    // Website registrations are pre-verified demo accounts with full identity.
-    const { wtsId, walletId } = await issueWtsIdentity(tx);
+    // Website registrations now go through the same admin-review lifecycle
+    // as WhatsApp registrations. wtsId/walletId are issued only on approval.
     return tx.user.create({
       data: {
         phone,
@@ -49,10 +48,8 @@ export async function register(db: Db, input: RegisterInput) {
         referralCode: code,
         referredById: null,
         demoBalance: 0,
-        verificationStatus: "VERIFIED",
-        transfersEnabled: true,
-        wtsId,
-        walletId,
+        verificationStatus: "PENDING_REVIEW",
+        transfersEnabled: false,
         fullName: input.username.trim(),
       },
     });
@@ -71,6 +68,12 @@ export async function login(db: Db, input: { phone: string; password: string }) 
   const ok = await bcrypt.compare(input.password, user.passwordHash);
   if (!ok) throw new AuthError("INVALID_CREDENTIALS", "Invalid phone or password.");
   if (user.status !== "ACTIVE") throw new AuthError("INVALID_CREDENTIALS", "Account is frozen. Contact support.");
+  if (user.verificationStatus === "PENDING_REVIEW" || user.verificationStatus === "UNVERIFIED") {
+    throw new AuthError("PENDING_REVIEW", "Your account is still awaiting admin review. You'll be notified once it's approved.");
+  }
+  if (user.verificationStatus === "REJECTED") {
+    throw new AuthError("REJECTED", user.rejectionReason ? `Registration rejected: ${user.rejectionReason}` : "Registration was rejected.");
+  }
   return {
     id: user.id,
     phone: user.phone,

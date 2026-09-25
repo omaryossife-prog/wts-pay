@@ -18,14 +18,13 @@ export const loginSchema = z.object({
 
 export async function registerController(req: Request, res: Response) {
   const user = await register(prisma, req.body);
-  const token = signToken({ userId: user.id, role: "USER" });
-  res.cookie("wts_token", token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 7 * 24 * 3600 * 1000,
+  // لا نسجّل دخول المستخدم تلقائيًا بعد التسجيل — الحساب لازم يتراجع
+  // ويتوافق عليه من الأدمن أول (verificationStatus: PENDING_REVIEW).
+  res.status(201).json({
+    user,
+    pendingReview: true,
+    message: "Registration received. Your account is awaiting admin review.",
   });
-  res.status(201).json({ user, token });
 }
 
 export async function loginController(req: Request, res: Response) {

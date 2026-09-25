@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
 export default function Register() {
   const { register } = useAuth();
-  const nav = useNavigate();
   const [params] = useSearchParams();
   const [form, setForm] = useState({
     phone: "",
@@ -14,6 +13,7 @@ export default function Register() {
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingReview, setPendingReview] = useState(false);
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -24,13 +24,30 @@ export default function Register() {
     setBusy(true);
     try {
       await register({ ...form, referralCode: form.referralCode || undefined });
-      nav("/wallet");
+      setPendingReview(true);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setBusy(false);
     }
   };
+
+  if (pendingReview) {
+    return (
+      <div className="shell" style={{ paddingTop: 40 }}>
+        <div className="hero"><div className="logo">WTS <span>Pay</span></div></div>
+        <div className="card">
+          <h2>تم استلام طلب التسجيل</h2>
+          <p className="muted">
+            حسابك دلوقتي قيد مراجعة الأدمن. هتقدر تسجّل دخول بعد ما يتم قبول حسابك.
+          </p>
+          <Link to="/login" className="btn" style={{ display: "inline-block", textAlign: "center", marginTop: 16 }}>
+            رجوع لتسجيل الدخول
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="shell" style={{ paddingTop: 40 }}>
@@ -43,7 +60,7 @@ export default function Register() {
         {error && <div className="error">{error}</div>}
         <form onSubmit={submit}>
           <div className="field">
-            <label>Phone number</label>
+            <label>WhatsApp number</label>
             <input value={form.phone} onChange={set("phone")} placeholder="+2010xxxxxxx" required />
           </div>
           <div className="field">

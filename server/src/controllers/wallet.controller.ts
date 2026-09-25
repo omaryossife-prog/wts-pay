@@ -4,7 +4,7 @@ import { prisma } from "../utils/prisma.js";
 import { transfer } from "../services/wallet.service.js";
 import { evaluateReferralEligibility } from "../services/referral.service.js";
 import { computeFee } from "../services/fee.service.js";
-import { HttpError } from "../middleware/errorHandler.js";
+import { maskPhone } from "../utils/phone-mask.js";
 
 export const transferSchema = z.object({
   recipientPhone: z.string().min(8).max(20),
@@ -26,9 +26,6 @@ export async function getWalletController(req: Request, res: Response) {
       transfersEnabled: true,
     },
   });
-  if (!user) {
-    throw new HttpError(404, "User not found");
-  }
   res.json({ user, notice: "Demo Balance — No Cash Value. Demo credits cannot be withdrawn or exchanged for real money." });
 }
 
@@ -70,5 +67,16 @@ export async function transactionsController(req: Request, res: Response) {
       where: { OR: [{ senderId: req.user!.userId }, { receiverId: req.user!.userId }] },
     }),
   ]);
-  res.json({ items, total, page, limit });
+
+  // نخفي رقم الطرف التاني بس — رقم المستخدم نفسه يفضل ظاهر كامل.
+  const masked = items.map((t) => {
+    const isSender = t.senderId === req.user!.userId;
+    return {
+      ...t,
+      sender: t.sender ? { ...t.sender, phone: isSender ? t.sender.phone : maskPhone(t.sender.phone) } : t.sender,
+      receiver: t.receiver ? { ...t.receiver, phone: isSender ? maskPhone(t.receiver.phone) : t.receiver.phone } : t.receiver,
+    };
+  });
+
+  res.json({ items: masked, total, page, limit });
 }
