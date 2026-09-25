@@ -6,6 +6,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Wallet from "./pages/Wallet";
 import Send from "./pages/Send";
+import Requests from "./pages/Requests";
 import Transactions from "./pages/Transactions";
 import Referrals from "./pages/Referrals";
 import Profile from "./pages/Profile";
@@ -29,6 +30,7 @@ export default function App() {
       <Route element={<Protected><Layout /></Protected>}>
         <Route path="/wallet" element={<Wallet />} />
         <Route path="/send" element={<Send />} />
+        <Route path="/requests" element={<Requests />} />
         <Route path="/transactions" element={<Transactions />} />
         <Route path="/referrals" element={<Referrals />} />
         <Route path="/profile" element={<Profile />} />

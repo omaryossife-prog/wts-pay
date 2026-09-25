@@ -395,6 +395,32 @@ export async function notifyRejection(phone: string, reason: string) {
   await sendTextMessage(phone.replace("+", ""), `Your WTS Pay registration was rejected. Reason: ${reason}. Contact support if you believe this is a mistake.`);
 }
 
+// ── طلب تحويل: إشعارات واتساب بسيطة (نصية) ──────────────────────────────
+// الرد الفعلي (قبول/رفض) بيتم من الموقع دلوقتي؛ الرسالة هنا للتنبيه بس.
+export async function notifyMoneyRequest(phone: string, requesterName: string, amount: number, requestId: string) {
+  const { sendTextMessage } = await import("./whatsapp.client.js");
+  await sendTextMessage(
+    phone.replace("+", ""),
+    `\u{1F4E9} ${requesterName} is requesting ${amount} EGP from you on WTS Pay.\nOpen the app to accept or reject this request.`
+  );
+}
+
+export async function notifyRequestAccepted(phone: string, amount: number) {
+  const { sendTextMessage } = await import("./whatsapp.client.js");
+  await sendTextMessage(
+    phone.replace("+", ""),
+    `\u2705 Your request for ${amount} EGP was accepted and the money has been sent to your wallet.`
+  );
+}
+
+export async function notifyRequestRejected(phone: string, amount: number) {
+  const { sendTextMessage } = await import("./whatsapp.client.js");
+  await sendTextMessage(
+    phone.replace("+", ""),
+    `\u274C Your request for ${amount} EGP was rejected.`
+  );
+}
+
 export function walletLogger() {
   return logger;
 }

@@ -3,6 +3,7 @@ import { WalletError } from "../services/wallet.service.js";
 import { AuthError } from "../services/user.service.js";
 import { PinError } from "../services/pin.service.js";
 import { AuthorizationError } from "../services/txauth.service.js";
+import { TransferRequestError } from "../services/transferRequest.service.js";
 import { logger } from "../utils/logger.js";
 
 export class HttpError extends Error {
@@ -61,6 +62,19 @@ export function errorHandler(
   if (err instanceof AuthError) {
     const status =
       err.code === "PHONE_TAKEN" ? 409 : err.code === "VALIDATION" ? 400 : 401;
+
+    return res.status(status).json({ error: err.message, code: err.code });
+  }
+
+  if (err instanceof TransferRequestError) {
+    const status =
+      err.code === "NOT_FOUND" || err.code === "USER_NOT_FOUND"
+        ? 404
+        : err.code === "WRONG_USER"
+        ? 403
+        : err.code === "INVALID_AMOUNT" || err.code === "LIMIT_EXCEEDED" || err.code === "SELF_REQUEST"
+        ? 400
+        : 410; // ALREADY_RESOLVED / EXPIRED
 
     return res.status(status).json({ error: err.message, code: err.code });
   }

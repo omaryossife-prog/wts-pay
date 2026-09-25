@@ -59,6 +59,14 @@ enum AuthorizationStatus {
   INVALIDATED
 }
 
+enum TransferRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELED
+  EXPIRED
+}
+
 model User {
   id            String        @id @default(uuid())
   phone         String        @unique
@@ -121,6 +129,8 @@ model User {
   auditLogsAsUser  AuditLog[] @relation("AuditLogUser")
   authorizationsSent   TransactionAuthorization[] @relation("AuthSender")
   authorizationsRecv   TransactionAuthorization[] @relation("AuthRecipient")
+  requestsMade         TransferRequest[] @relation("RequestMadeBy")
+  requestsReceived     TransferRequest[] @relation("RequestSentTo")
 
   @@map("users")
 }
@@ -187,6 +197,30 @@ model Referral {
 
   @@index([referrerId])
   @@map("referrals")
+}
+
+// طلب تحويل: مستخدم بيطلب من مستخدم تاني يحوّله مبلغ معيّن.
+// لو المطلوب منه (payer) وافق، بتتفعل نفس شاشة إدخال الـ PIN، وبعد
+// التأكيد بينفّذ تحويل حقيقي من الـ payer للـ requester بالمبلغ ده.
+model TransferRequest {
+  id             String                 @id @default(uuid())
+  requesterId    String // اللي طالب الفلوس (هيستلم لو تم القبول)
+  payerId        String // المطلوب منه يحول (هيبعت لو وافق)
+  amount         Int
+  description    String?
+  status         TransferRequestStatus @default(PENDING)
+  idempotencyKey String                 @unique
+  transactionId  String? // العملية الناتجة بعد القبول
+  createdAt      DateTime               @default(now())
+  respondedAt    DateTime?
+  expiresAt      DateTime
+
+  requester User @relation("RequestMadeBy", fields: [requesterId], references: [id])
+  payer     User @relation("RequestSentTo", fields: [payerId], references: [id])
+
+  @@index([payerId, status])
+  @@index([requesterId, status])
+  @@map("transfer_requests")
 }
 
 // Key-value store for admin-configurable settings (fees, rewards, campaigns,

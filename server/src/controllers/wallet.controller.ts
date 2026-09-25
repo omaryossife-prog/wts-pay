@@ -1,10 +1,17 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
 import { prisma } from "../utils/prisma.js";
 import { transfer } from "../services/wallet.service.js";
 import { evaluateReferralEligibility } from "../services/referral.service.js";
 import { computeFee } from "../services/fee.service.js";
 import { maskPhone } from "../utils/phone-mask.js";
+import { setPin, PinError } from "../services/pin.service.js";
+
+export const setPinSchema = z.object({
+  password: z.string().min(1),
+  pin: z.string().length(6),
+});
 
 export const transferSchema = z.object({
   recipientPhone: z.string().min(8).max(20),
@@ -23,10 +30,25 @@ export async function getWalletController(req: Request, res: Response) {
       id: true, phone: true, username: true, demoBalance: true,
       referralCode: true, referralCount: true, status: true, createdAt: true,
       wtsId: true, walletId: true, fullName: true, verificationStatus: true,
-      transfersEnabled: true,
+      transfersEnabled: true, pinHash: true,
     },
   });
-  res.json({ user, notice: "Demo Balance — No Cash Value. Demo credits cannot be withdrawn or exchanged for real money." });
+  const { pinHash, ...safeUser } = user ?? {};
+  res.json({
+    user: { ...safeUser, pinSet: !!pinHash },
+    notice: "Demo Balance — No Cash Value. Demo credits cannot be withdrawn or exchanged for real money.",
+  });
+}
+
+export async function setPinController(req: Request, res: Response) {
+  const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+  if (!user) throw new PinError("PIN_NOT_SET", "Account not found.");
+  const ok = await bcrypt.compare(req.body.password, user.passwordHash);
+  if (!ok) {
+    return res.status(401).json({ error: "Incorrect password.", code: "INVALID_PASSWORD" });
+  }
+  await setPin(prisma, { userId: req.user!.userId, pin: req.body.pin, ip: req.ip });
+  res.json({ ok: true });
 }
 
 export async function quoteController(req: Request, res: Response) {

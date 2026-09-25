@@ -8,6 +8,7 @@ interface AuthCtx {
   login: (phone: string, password: string) => Promise<void>;
   register: (data: { phone: string; username: string; password: string; referralCode?: string }) => Promise<{ pendingReview?: boolean; message?: string }>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const Ctx = createContext<AuthCtx>(null as never);
@@ -46,7 +47,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
-  return <Ctx.Provider value={{ user, loading, login, register, logout }}>{children}</Ctx.Provider>;
+  const refreshUser = async () => {
+    if (!getToken()) return;
+    try {
+      const r = await api.wallet();
+      setUser(r.user);
+    } catch {
+      // ignore — user page will surface errors on next interaction
+    }
+  };
+
+  return <Ctx.Provider value={{ user, loading, login, register, logout, refreshUser }}>{children}</Ctx.Provider>;
 }
 
 export function useAuth() {

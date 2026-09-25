@@ -12,6 +12,7 @@ export interface User {
   fullName?: string | null;
   verificationStatus?: string;
   transfersEnabled?: boolean;
+  pinSet?: boolean;
 }
 
 export interface Transaction {
@@ -36,6 +37,20 @@ export interface Referral {
   status: string;
   createdAt: string;
   referred?: { phone: string; username: string; createdAt: string };
+}
+
+export interface TransferRequest {
+  id: string;
+  requesterId: string;
+  payerId: string;
+  amount: number;
+  description: string | null;
+  status: "PENDING" | "ACCEPTED" | "REJECTED" | "CANCELED" | "EXPIRED";
+  createdAt: string;
+  respondedAt: string | null;
+  transactionId: string | null;
+  requester?: { phone: string; username: string; wtsId: string | null };
+  payer?: { phone: string; username: string; wtsId: string | null };
 }
 
 export interface PendingVerification {

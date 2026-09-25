@@ -4,7 +4,7 @@ import { validate } from "../middleware/validate.middleware.js";
 import { transferLimiter } from "../middleware/rateLimit.middleware.js";
 import {
   getWalletController, transferController, transactionsController, quoteController,
-  transferSchema, quoteSchema,
+  setPinController, transferSchema, quoteSchema, setPinSchema,
 } from "../controllers/wallet.controller.js";
 
 const router = Router();
@@ -13,4 +13,5 @@ router.get("/", getWalletController);
 router.post("/quote", validate(quoteSchema), quoteController);
 router.post("/transfer", transferLimiter, idempotency, validate(transferSchema), transferController);
 router.get("/transactions", transactionsController);
+router.post("/pin", transferLimiter, validate(setPinSchema), setPinController);
 export default router;

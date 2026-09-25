@@ -65,7 +65,7 @@ export const api = {
       referralCode?: string;
     }
   ) =>
-    request<{ user: any; pendingReview?: boolean; message?: string }>("/api/auth/register", {
+    request<{ user: any; token: string }>("/api/auth/register", {
       method: "POST",
       body: JSON.stringify(data),
     }),
