@@ -17,6 +17,11 @@ import {
 } from "../services/txauth.service.js";
 import { verifyPin, setPin, PinError } from "../services/pin.service.js";
 import {
+  createTransferRequest, listIncomingRequests, rejectTransferRequest,
+  acceptTransferRequest, TransferRequestError,
+} from "../services/transferRequest.service.js";
+import type { WaListSectionRow } from "./whatsapp.templates.js";
+import {
   validateFourPartName, findByWhatsAppIdentity, createRegistration, recordFullName,
   recordIdSubmitted, recordFaceVideoSubmitted, normalizeWaPhone,
 } from "../services/registration.service.js";
@@ -41,6 +46,10 @@ export const SessionState = {
   SEND_WAIT_AMOUNT: "SEND_WAIT_AMOUNT",
   SEND_CONFIRMATION: "SEND_CONFIRMATION",
   SEND_PIN: "SEND_PIN",
+  // money requests (ask someone to pay you)
+  REQ_WAIT_PHONE: "REQ_WAIT_PHONE",
+  REQ_WAIT_AMOUNT: "REQ_WAIT_AMOUNT",
+  REQ_PIN: "REQ_PIN",
 } as const;
 export type SessionState = (typeof SessionState)[keyof typeof SessionState];
 
@@ -52,6 +61,7 @@ interface WaSessionData {
   fee?: number;
   totalDebit?: number;
   authorizationId?: string;
+  pendingRequestId?: string; // for accepting a specific money request via PIN
   pendingPin?: string; // fallback setup only, never persisted beyond setup
 }
 
@@ -370,6 +380,127 @@ export async function handleAuthorizationPin(userId: string, raw: string): Promi
   }
 }
 
+// ---------------- Money requests (ask someone to pay you) ----------------
+
+export async function getRequestsMenuRows(userId: string): Promise<WaListSectionRow[]> {
+  const pending = await listIncomingRequests(prisma, userId);
+  const rows: WaListSectionRow[] = pending.slice(0, 9).map((r: any) => ({
+    id: `req_view_${r.id}`,
+    title: `${r.amount} EGP`,
+    description: `from ${r.requester?.username ?? "WTS user"}`,
+  }));
+  rows.push({ id: "req_new", title: "\u2795 Request money", description: "Ask someone to pay you" });
+  return rows;
+}
+
+export async function beginMoneyRequest(userId: string): Promise<string> {
+  await setSession(userId, SessionState.REQ_WAIT_PHONE, {});
+  return "Who do you want to request money from? Enter their WhatsApp number (e.g. +2010\u2026).";
+}
+
+export async function handleRequestPhoneInput(userId: string, phone: string): Promise<{ text: string; ok: boolean }> {
+  const clean = phone.replace(/[\s\-()]/g, "");
+  if (!/^\+?[0-9]{8,15}$/.test(clean)) {
+    return { text: "That doesn't look like a valid phone number. Try again (e.g. +2010xxxxxxx).", ok: false };
+  }
+  const payer = await prisma.user.findUnique({ where: { phone: normalizeWaPhone(clean.replace("+", "")) } });
+  if (!payer) return { text: "No WTS user found with that phone number. Try again or type *menu*.", ok: false };
+  if (payer.id === userId) return { text: "You cannot request money from yourself.", ok: false };
+  await setSession(userId, SessionState.REQ_WAIT_AMOUNT, {
+    recipientPhone: payer.phone,
+    recipientName: payer.fullName ?? payer.username,
+  });
+  return { text: `Requesting from *${payer.fullName ?? payer.username}*.\nEnter the amount in EGP:`, ok: true };
+}
+
+export async function handleRequestAmountInput(userId: string, raw: string): Promise<string> {
+  const amount = Number(raw.replace(/[^0-9]/g, ""));
+  if (!Number.isInteger(amount) || amount <= 0) return "Enter a whole number amount greater than 0, e.g. 500.";
+  const session = await getSession(userId);
+  const payerPhone = session.data.recipientPhone;
+  if (!payerPhone) {
+    await setSession(userId, SessionState.IDLE, {});
+    return "Session expired. Type *menu* to start again.";
+  }
+  try {
+    const requester = await prisma.user.findUnique({ where: { id: userId } });
+    const { request, payer } = await createTransferRequest(prisma, {
+      requesterId: userId,
+      payerPhone,
+      amount,
+    });
+    await setSession(userId, SessionState.IDLE, {});
+    await notifyMoneyRequest(
+      payer.whatsappPhone ?? payer.phone,
+      requester?.fullName ?? requester?.username ?? "A WTS user",
+      request.amount,
+      request.id
+    ).catch(() => {});
+    return `\u2705 Request sent to *${session.data.recipientName ?? payerPhone}* for ${amount.toLocaleString()} EGP. You'll be notified here when they respond.`;
+  } catch (err: any) {
+    await setSession(userId, SessionState.IDLE, {});
+    return `Could not send the request: ${err.message ?? "unknown error"}. Type *menu* to try again.`;
+  }
+}
+
+export async function viewIncomingRequest(userId: string, requestId: string): Promise<{ text: string; buttons: { id: string; title: string }[] }> {
+  const pending = await listIncomingRequests(prisma, userId);
+  const request = pending.find((r: any) => r.id === requestId);
+  if (!request) {
+    return { text: "This request is no longer available. Type *menu*.", buttons: [] };
+  }
+  return {
+    text: `*${request.requester?.username ?? "A WTS user"}* is requesting *${request.amount} EGP* from you.${request.description ? `\nReason: ${request.description}` : ""}`,
+    buttons: [
+      { id: `req_accept_${request.id}`, title: "\u2705 Accept" },
+      { id: `req_reject_${request.id}`, title: "\u274C Reject" },
+    ],
+  };
+}
+
+export async function rejectIncomingRequest(userId: string, requestId: string): Promise<string> {
+  try {
+    const updated = await rejectTransferRequest(prisma, { requestId, payerId: userId });
+    const requester = await prisma.user.findUnique({ where: { id: updated.requesterId } });
+    if (requester) {
+      await notifyRequestRejected(requester.whatsappPhone ?? requester.phone, updated.amount).catch(() => {});
+    }
+    return "Request rejected.";
+  } catch (err: any) {
+    return err instanceof TransferRequestError ? err.message : "Could not reject this request.";
+  }
+}
+
+export async function beginAcceptRequest(userId: string, requestId: string): Promise<string> {
+  await setSession(userId, SessionState.REQ_PIN, { pendingRequestId: requestId });
+  return "\u{1F512} Enter your 6-digit WTS PIN to accept this request and send the money.";
+}
+
+export async function handleRequestPinInput(userId: string, raw: string): Promise<string> {
+  const pin = raw.trim();
+  if (!/^\d{6}$/.test(pin)) return "Enter your 6-digit WTS PIN (numbers only).";
+  const session = await getSession(userId);
+  const requestId = session.data.pendingRequestId;
+  if (!requestId) {
+    await setSession(userId, SessionState.IDLE, {});
+    return "Session expired. Type *menu* to start again.";
+  }
+  try {
+    const { transaction, requester } = await acceptTransferRequest(prisma, { requestId, payerId: userId, pin });
+    await setSession(userId, SessionState.IDLE, {});
+    await notifyRequestAccepted(requester.whatsappPhone ?? requester.phone, transaction.amount).catch(() => {});
+    return `\u2705 Accepted. ${transaction.amount.toLocaleString()} EGP sent. Type *menu* for the main menu.`;
+  } catch (err: any) {
+    if (err instanceof PinError) {
+      return err.message; // includes lockout / attempts-remaining messaging
+    }
+    await setSession(userId, SessionState.IDLE, {});
+    return err instanceof TransferRequestError
+      ? `${err.message} Type *menu*.`
+      : "Could not complete this request. Type *menu* to try again.";
+  }
+}
+
 export async function notifyFreeze(userPhone: string, frozen: boolean) {
   const { sendTextMessage } = await import("./whatsapp.client.js");
   await sendTextMessage(
@@ -395,8 +526,8 @@ export async function notifyRejection(phone: string, reason: string) {
   await sendTextMessage(phone.replace("+", ""), `Your WTS Pay registration was rejected. Reason: ${reason}. Contact support if you believe this is a mistake.`);
 }
 
-// ── طلب تحويل: إشعارات واتساب بسيطة (نصية) ──────────────────────────────
-// الرد الفعلي (قبول/رفض) بيتم من الموقع دلوقتي؛ الرسالة هنا للتنبيه بس.
+// ── طلب تحويل: إشعارات واتساب (نصية) ────────────────────────────────────
+// الرد (قبول/رفض) ممكن يتم من الموقع أو من واتساب نفسه دلوقتي.
 export async function notifyMoneyRequest(phone: string, requesterName: string, amount: number, requestId: string) {
   const { sendTextMessage } = await import("./whatsapp.client.js");
   await sendTextMessage(
