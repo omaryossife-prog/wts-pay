@@ -19,6 +19,8 @@ import {
   getBalanceText, getTransactionsText, getReferralText, getAccountText, HELP_TEXT,
   beginSendMoney, handlePhoneInput, handleAmountInput,
   confirmTransfer, cancelTransfer, handleAuthorizationPin,
+  getRequestsMenuRows, beginMoneyRequest, handleRequestPhoneInput, handleRequestAmountInput,
+  viewIncomingRequest, rejectIncomingRequest, beginAcceptRequest, handleRequestPinInput,
 } from "./whatsapp.service.js";
 
 export interface IncomingMessage {
@@ -40,6 +42,11 @@ async function sendMainMenu(to: string, firstName?: string) {
     "Open menu",
     [{ title: "WTS Pay", rows: MAIN_MENU_ROWS }]
   );
+}
+
+async function sendRequestsMenu(to: string, userId: string) {
+  const rows = await getRequestsMenuRows(userId);
+  await sendListMessage(to, "Money Requests", "Open", [{ title: "Requests", rows }]);
 }
 
 async function routeMenuAction(userId: string, action: string): Promise<string | null> {
@@ -225,6 +232,36 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
     if (sent) return;
   }
 
+  // Money requests: menu list, viewing one, accepting/rejecting, starting a new one.
+  if (replyId === ACTIONS.REQUESTS) {
+    await sendRequestsMenu(to, user.id);
+    return;
+  }
+  if (replyId === ACTIONS.NEW_REQUEST) {
+    await sendTextMessage(to, await beginMoneyRequest(user.id));
+    return;
+  }
+  if (replyId?.startsWith("req_view_")) {
+    const requestId = replyId.slice("req_view_".length);
+    const view = await viewIncomingRequest(user.id, requestId);
+    if (view.buttons.length > 0) {
+      await sendButtonMessage(to, view.text, view.buttons);
+    } else {
+      await sendTextMessage(to, view.text);
+    }
+    return;
+  }
+  if (replyId?.startsWith("req_accept_")) {
+    const requestId = replyId.slice("req_accept_".length);
+    await sendTextMessage(to, await beginAcceptRequest(user.id, requestId));
+    return;
+  }
+  if (replyId?.startsWith("req_reject_")) {
+    const requestId = replyId.slice("req_reject_".length);
+    await sendTextMessage(to, await rejectIncomingRequest(user.id, requestId));
+    return;
+  }
+
   // Menu shortcuts
   if (replyId) {
     const menuText = await routeMenuAction(user.id, replyId);
@@ -267,6 +304,21 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
         return;
       }
       const r = await handleAuthorizationPin(user.id, text);
+      await sendTextMessage(to, r);
+      return;
+    }
+    case SessionState.REQ_WAIT_PHONE: {
+      const r = await handleRequestPhoneInput(user.id, text);
+      await sendTextMessage(to, r.text);
+      return;
+    }
+    case SessionState.REQ_WAIT_AMOUNT: {
+      const r = await handleRequestAmountInput(user.id, text);
+      await sendTextMessage(to, r);
+      return;
+    }
+    case SessionState.REQ_PIN: {
+      const r = await handleRequestPinInput(user.id, text);
       await sendTextMessage(to, r);
       return;
     }
