@@ -99,6 +99,8 @@ export const ACTIONS = {
   REFERRALS: "menu_referrals",
   ACCOUNT: "menu_account",
   HELP: "menu_help",
+  REQUESTS: "menu_requests",
+  NEW_REQUEST: "req_new",
   CREATE_PIN: "create_pin",
   CONFIRM_TRANSFER: "confirm_transfer",
   CANCEL: "cancel_action",
@@ -112,6 +114,7 @@ export const START_BUTTON: WaButton = { id: ACTIONS.START, title: "\u{1F680} Sta
 export const MAIN_MENU_ROWS: WaListSectionRow[] = [
   { id: ACTIONS.BALANCE, title: "\u{1F4B0} Balance", description: "Check your demo balance" },
   { id: ACTIONS.SEND_MONEY, title: "\u{1F4B8} Send Money", description: "Transfer to another WTS user" },
+  { id: ACTIONS.REQUESTS, title: "\u{1F64F} Money Requests", description: "Ask someone to pay you, or respond" },
   { id: ACTIONS.TRANSACTIONS, title: "\u{1F4DC} Transactions", description: "Your recent activity" },
   { id: ACTIONS.REFERRALS, title: "\u{1F381} Referrals", description: "Invite and earn demo credits" },
   { id: ACTIONS.ACCOUNT, title: "\u{1F464} My Account", description: "Profile, WTS ID and status" },
