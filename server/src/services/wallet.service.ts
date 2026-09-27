@@ -34,6 +34,8 @@ async function creditInternal(
   description: string,
   senderId: string | null = null
 ) {
+  const before = await db.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
+  if (!before) throw new WalletError("USER_NOT_FOUND", "Receiver account unavailable.");
   const res = await db.user.updateMany({
     where: { id: userId, status: "ACTIVE" },
     data: { demoBalance: { increment: amount } },
@@ -51,6 +53,8 @@ async function creditInternal(
       idempotencyKey,
       description,
       status: "COMPLETED",
+      receiverBalanceBefore: before.demoBalance,
+      receiverBalanceAfter: before.demoBalance + amount,
     },
   });
 }
@@ -186,6 +190,10 @@ export async function transferInTx(tx: any, input: TransferInput): Promise<Trans
       status: "COMPLETED",
       escrowEnabled: !!input.escrowEnabled,
       escrowReleaseAt: input.escrowEnabled ? new Date(Date.now() + 48 * 3600 * 1000) : null,
+      senderBalanceBefore: sender.demoBalance,
+      senderBalanceAfter: sender.demoBalance - totalDebit,
+      receiverBalanceBefore: receiver.demoBalance,
+      receiverBalanceAfter: receiver.demoBalance + input.amount,
     },
   });
 

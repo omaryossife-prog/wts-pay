@@ -28,6 +28,10 @@ export interface Transaction {
   description: string | null;
   balanceBefore?: number | null;
   balanceAfter?: number | null;
+  senderBalanceBefore?: number | null;
+  senderBalanceAfter?: number | null;
+  receiverBalanceBefore?: number | null;
+  receiverBalanceAfter?: number | null;
   createdAt: string;
   escrowEnabled?: boolean;
   escrowReleaseAt?: string | null;

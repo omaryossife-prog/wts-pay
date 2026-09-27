@@ -246,20 +246,25 @@ function Users() {
             </p>
 
             <h2 style={{ marginTop: 16 }}>Recent transactions</h2>
-            {detail.transactions.slice(0, 10).map((t: Transaction) => (
+            {detail.transactions.slice(0, 10).map((t: Transaction) => {
+              const isThisSender = t.senderId === detail.user.id;
+              const before = isThisSender ? (t.senderBalanceBefore ?? t.balanceBefore) : (t.receiverBalanceBefore ?? t.balanceBefore);
+              const after = isThisSender ? (t.senderBalanceAfter ?? t.balanceAfter) : (t.receiverBalanceAfter ?? t.balanceAfter);
+              return (
               <div className="list-row" key={t.id}>
                 <div>
                   <div style={{ fontSize: 14 }}>{t.type.replace(/_/g, " ")} — {t.amount} EGP</div>
                   <div className="meta">
                     {t.description ?? ""}
-                    {t.balanceBefore !== null && t.balanceAfter !== null && ` · ${t.balanceBefore} → ${t.balanceAfter}`}
+                    {before != null && after != null && ` · ${before} → ${after}`}
                     {" · "}{new Date(t.createdAt).toLocaleString()}
                   </div>
                   <div className="meta" style={{ opacity: 0.7 }}>Ref: {t.reference}</div>
                 </div>
                 <span className={`badge ${t.status === "COMPLETED" ? "green" : "amber"}`}>{t.status}</span>
               </div>
-            ))}
+              );
+            })}
 
             <h2 style={{ marginTop: 16 }}>Fraud reports on this user</h2>
             {(!detail.fraudReports || detail.fraudReports.length === 0) && <p className="muted">No reports.</p>}
@@ -412,7 +417,7 @@ function TransactionsTab() {
         <button className="btn small" onClick={load}>Search</button>
       </div>
       <table>
-        <thead><tr><th>Reference</th><th>Date</th><th>Type</th><th>From</th><th>To</th><th>Amount</th><th>Fee</th><th>Before→After</th><th>Status</th></tr></thead>
+        <thead><tr><th>Reference</th><th>Date</th><th>Type</th><th>From</th><th>Sender bal.</th><th>To</th><th>Receiver bal.</th><th>Amount</th><th>Fee</th><th>Status</th></tr></thead>
         <tbody>
           {items.map((t) => (
             <tr key={t.id}>
@@ -420,10 +425,19 @@ function TransactionsTab() {
               <td>{new Date(t.createdAt).toLocaleString()}</td>
               <td>{t.type.replace(/_/g, " ")}</td>
               <td>{t.sender?.phone ?? "—"}</td>
+              <td className="meta">
+                {t.senderId
+                  ? `${t.senderBalanceBefore ?? t.balanceBefore ?? "—"}→${t.senderBalanceAfter ?? t.balanceAfter ?? "—"}`
+                  : "—"}
+              </td>
               <td>{t.receiver?.phone ?? "—"}</td>
+              <td className="meta">
+                {t.receiverId
+                  ? `${t.receiverBalanceBefore ?? t.balanceBefore ?? "—"}→${t.receiverBalanceAfter ?? t.balanceAfter ?? "—"}`
+                  : "—"}
+              </td>
               <td>{t.amount}</td>
               <td>{t.fee}</td>
-              <td className="meta">{t.balanceBefore ?? "—"}→{t.balanceAfter ?? "—"}</td>
               <td><span className={`badge ${t.status === "COMPLETED" ? "green" : "amber"}`}>{t.status}</span></td>
             </tr>
           ))}

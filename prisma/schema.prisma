@@ -162,6 +162,10 @@ model Transaction {
   description    String?
   balanceBefore  Int?              // for MANUAL_ADJUSTMENT auditability
   balanceAfter   Int?
+  senderBalanceBefore   Int? // كل عملية تحويل بتسجّل رصيد الطرفين قبل وبعد، مش بس التعديل اليدوي
+  senderBalanceAfter    Int?
+  receiverBalanceBefore Int?
+  receiverBalanceAfter  Int?
   createdAt      DateTime          @default(now())
 
   // ---- Anti-fraud "escrow" hold: money lands in the receiver's balance
