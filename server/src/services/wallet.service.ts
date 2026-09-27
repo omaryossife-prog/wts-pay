@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import type { Db } from "../utils/prisma.js";
 import { computeFee } from "./fee.service.js";
 import { logAudit } from "./audit.service.js";
@@ -40,6 +41,7 @@ async function creditInternal(
   if (res.count !== 1) throw new WalletError("USER_NOT_FOUND", "Receiver account unavailable.");
   return db.transaction.create({
     data: {
+      reference: generateTxReference(),
       senderId,
       receiverId: userId,
       amount,
@@ -54,6 +56,14 @@ async function creditInternal(
 }
 
 // Guards shared by every transfer entry point (website or WhatsApp).
+// رقم مرجعي قصير لكل عملية (زي WTS-260927-K3F9) — يظهر للمستخدم وللأدمن،
+// وبيتستخدم للبحث والاسترجاع لو حصل خطأ.
+export function generateTxReference(): string {
+  const date = new Date().toISOString().slice(2, 10).replace(/-/g, ""); // YYMMDD
+  const suffix = crypto.randomBytes(4).toString("hex").toUpperCase();
+  return `WTS-${date}-${suffix}`;
+}
+
 async function assertCanTransfer(tx: any, userId: string, role: "sender" | "receiver") {
   const u = await tx.user.findUnique({ where: { id: userId } });
   if (!u) throw new WalletError("USER_NOT_FOUND", `${role === "sender" ? "Sender" : "Recipient"} not found.`);
@@ -164,6 +174,7 @@ export async function transferInTx(tx: any, input: TransferInput): Promise<Trans
   // 6) Immutable ledger record
   const transaction = await tx.transaction.create({
     data: {
+      reference: generateTxReference(),
       senderId: sender.id,
       receiverId: receiver.id,
       amount: input.amount,
@@ -263,6 +274,7 @@ export async function adjustBalance(
 
     const txRow = await tx.transaction.create({
       data: {
+        reference: generateTxReference(),
         senderId: input.amount < 0 ? user.id : null,
         receiverId: input.amount >= 0 ? user.id : null,
         amount: Math.abs(input.amount),
@@ -320,6 +332,7 @@ export async function reverseReward(
     await tx.transaction.update({ where: { id: original.id }, data: { status: "REVERSED" } });
     const reversal = await tx.transaction.create({
       data: {
+        reference: generateTxReference(),
         senderId: original.receiverId,
         receiverId: null,
         amount: original.amount,

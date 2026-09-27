@@ -186,6 +186,13 @@ function Users() {
               <strong>{detail.user.pinHash ? "Set" : "Not set"} {detail.user.pinLockedUntil && new Date(detail.user.pinLockedUntil) > new Date() ? "🔒 locked" : ""}</strong></div>
             <div className="list-row"><span>Transfers</span>
               <strong>{detail.user.transfersEnabled ? "Enabled" : "Disabled"}</strong></div>
+            <div className="list-row"><span>Fraud reports</span>
+              <strong>
+                {detail.user.fraudReportCount ?? 0}
+                {detail.user.banned && " · BANNED"}
+                {detail.user.frozenUntil && new Date(detail.user.frozenUntil) > new Date() && ` · frozen until ${new Date(detail.user.frozenUntil).toLocaleDateString()}`}
+              </strong>
+            </div>
 
             <div className="row" style={{ margin: "12px 0" }}>
               {detail.user.status === "ACTIVE" ? (
@@ -248,8 +255,25 @@ function Users() {
                     {t.balanceBefore !== null && t.balanceAfter !== null && ` · ${t.balanceBefore} → ${t.balanceAfter}`}
                     {" · "}{new Date(t.createdAt).toLocaleString()}
                   </div>
+                  <div className="meta" style={{ opacity: 0.7 }}>Ref: {t.reference}</div>
                 </div>
                 <span className={`badge ${t.status === "COMPLETED" ? "green" : "amber"}`}>{t.status}</span>
+              </div>
+            ))}
+
+            <h2 style={{ marginTop: 16 }}>Fraud reports on this user</h2>
+            {(!detail.fraudReports || detail.fraudReports.length === 0) && <p className="muted">No reports.</p>}
+            {detail.fraudReports?.map((r: any) => (
+              <div className="list-row" key={r.id} style={{ flexDirection: "column", alignItems: "stretch", gap: 2 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>Report #{r.reportNumber}</span>
+                  <span className={`badge ${r.status === "CONFIRMED" ? "red" : r.status === "DISMISSED" ? "green" : "amber"}`}>{r.status}</span>
+                </div>
+                <span className="meta">
+                  Filed {new Date(r.createdAt).toLocaleString()}
+                  {r.resolvedAt && ` · resolved ${new Date(r.resolvedAt).toLocaleString()}`}
+                  {r.status === "CONFIRMED" && (r.clearedAt ? " · cleared" : r.visible ? " · visible" : " · hidden")}
+                </span>
               </div>
             ))}
           </>
@@ -371,15 +395,28 @@ function Audit() {
 
 function TransactionsTab() {
   const [items, setItems] = useState<Transaction[]>([]);
-  useEffect(() => { api.adminTransactions().then((r) => setItems(r.items)).catch(() => {}); }, []);
+  const [q, setQ] = useState("");
+  const load = () => api.adminTransactions("", q).then((r) => setItems(r.items)).catch(() => {});
+  useEffect(() => { load(); }, []);
   return (
     <div className="card">
       <h2>All transactions</h2>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <input
+          placeholder="Search by reference (WTS-...) or phone"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && load()}
+          style={{ flex: 1 }}
+        />
+        <button className="btn small" onClick={load}>Search</button>
+      </div>
       <table>
-        <thead><tr><th>Date</th><th>Type</th><th>From</th><th>To</th><th>Amount</th><th>Fee</th><th>Before→After</th><th>Status</th></tr></thead>
+        <thead><tr><th>Reference</th><th>Date</th><th>Type</th><th>From</th><th>To</th><th>Amount</th><th>Fee</th><th>Before→After</th><th>Status</th></tr></thead>
         <tbody>
           {items.map((t) => (
             <tr key={t.id}>
+              <td className="meta">{t.reference}</td>
               <td>{new Date(t.createdAt).toLocaleString()}</td>
               <td>{t.type.replace(/_/g, " ")}</td>
               <td>{t.sender?.phone ?? "—"}</td>

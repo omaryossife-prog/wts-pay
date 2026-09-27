@@ -40,6 +40,7 @@ export default function TxRow({ tx, viewerId }: { tx: Transaction; viewerId: str
           {other !== "—" ? `with ${other}` : tx.description ?? ""} · {new Date(tx.createdAt).toLocaleString()}
           {tx.fee > 0 && outgoing ? ` · fee ${fmt(tx.fee)}` : ""}
         </div>
+        <div className="meta" style={{ opacity: 0.7 }}>Ref: {tx.reference}</div>
         {canReport && (
           reported ? (
             <div className="notice" style={{ marginTop: 6, padding: "4px 8px" }}>Report submitted — our team will review it.</div>

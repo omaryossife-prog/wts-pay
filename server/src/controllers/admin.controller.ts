@@ -277,7 +277,17 @@ export async function auditController(_req: Request, res: Response) {
 }
 
 export async function allTransactionsController(req: Request, res: Response) {
-  const where = req.query.type ? { type: String(req.query.type) } : {};
+  const type = req.query.type ? String(req.query.type) : undefined;
+  const q = req.query.q ? String(req.query.q).trim() : undefined;
+  const where: any = {};
+  if (type) where.type = type;
+  if (q) {
+    where.OR = [
+      { reference: { contains: q, mode: "insensitive" } },
+      { sender: { phone: { contains: q } } },
+      { receiver: { phone: { contains: q } } },
+    ];
+  }
   const items = await prisma.transaction.findMany({
     where,
     orderBy: { createdAt: "desc" },

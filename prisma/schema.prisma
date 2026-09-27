@@ -150,6 +150,7 @@ model User {
 
 model Transaction {
   id             String            @id @default(uuid())
+  reference      String            @unique // رقم مرجعي قصير يظهر للمستخدم وللأدمن، يستخدم في البحث والاسترجاع
   senderId       String?
   receiverId     String?
   amount         Int

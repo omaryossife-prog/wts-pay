@@ -226,10 +226,13 @@ export const api = {
       body: JSON.stringify({ userId }),
     }),
 
-  adminTransactions: (type = "") =>
-    request<{ items: Transaction[] }>(
-      `/api/admin/transactions${type ? `?type=${type}` : ""}`
-    ),
+  adminTransactions: (type = "", q = "") => {
+    const params = new URLSearchParams();
+    if (type) params.set("type", type);
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    return request<{ items: Transaction[] }>(`/api/admin/transactions${qs ? `?${qs}` : ""}`);
+  },
 
   // ── طلبات التحويل (Request Money) ──────────────────────────────────
   createRequest: (data: { payerPhone: string; amount: number; description?: string }) =>

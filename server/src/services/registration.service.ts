@@ -11,6 +11,7 @@
 import type { Db } from "../utils/prisma.js";
 import { logAudit } from "./audit.service.js";
 import { getConfigJson } from "./config.service.js";
+import { generateTxReference } from "./wallet.service.js";
 
 // Four-part legal name validation, e.g. "Ahmed Mohamed Ali Hassan"
 export function validateFourPartName(raw: string): { ok: boolean; fullName?: string; error?: string } {
@@ -115,6 +116,7 @@ export async function approveRegistration(
       await tx.user.update({ where: { id: user.id }, data: { demoBalance: { increment: initial } } });
       await tx.transaction.create({
         data: {
+          reference: generateTxReference(),
           receiverId: user.id,
           amount: initial,
           fee: 0,

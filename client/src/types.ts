@@ -17,6 +17,7 @@ export interface User {
 
 export interface Transaction {
   id: string;
+  reference: string;
   senderId: string | null;
   receiverId: string | null;
   amount: number;

@@ -35,8 +35,11 @@ export async function fileFraudReport(
   if (!transaction.escrowEnabled) {
     throw new FraudReportError("NOT_ESCROW", "Only transfers sent with Anti-Fraud protection can be reported.");
   }
+  // عملية واحدة = بلاغ واحد بس، للأبد — سواء اتحسم قبل كده أو لسه معلّق.
+  // من غير الشرط ده، ممكن نفس العملية تتبلّغ 3 مرات وتصعّد حساب المستلم
+  // غلط من حادثة واحدة بس.
   const existing = await client.fraudReport.findFirst({
-    where: { transactionId: input.transactionId, status: "PENDING" },
+    where: { transactionId: input.transactionId },
   });
   if (existing) throw new FraudReportError("ALREADY_REPORTED", "This transaction already has a pending report.");
 
