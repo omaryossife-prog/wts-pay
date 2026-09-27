@@ -4,6 +4,7 @@ import { AuthError } from "../services/user.service.js";
 import { PinError } from "../services/pin.service.js";
 import { AuthorizationError } from "../services/txauth.service.js";
 import { TransferRequestError } from "../services/transferRequest.service.js";
+import { FraudReportError } from "../services/fraudReport.service.js";
 import { logger } from "../utils/logger.js";
 
 export class HttpError extends Error {
@@ -75,6 +76,19 @@ export function errorHandler(
         : err.code === "INVALID_AMOUNT" || err.code === "LIMIT_EXCEEDED" || err.code === "SELF_REQUEST"
         ? 400
         : 410; // ALREADY_RESOLVED / EXPIRED
+
+    return res.status(status).json({ error: err.message, code: err.code });
+  }
+
+  if (err instanceof FraudReportError) {
+    const status =
+      err.code === "TX_NOT_FOUND" || err.code === "NOT_FOUND"
+        ? 404
+        : err.code === "NOT_SENDER"
+        ? 403
+        : err.code === "NOT_ESCROW" || err.code === "ALREADY_REPORTED"
+        ? 400
+        : 410; // ALREADY_RESOLVED
 
     return res.status(status).json({ error: err.message, code: err.code });
   }

@@ -10,6 +10,10 @@ import {
   getConfigController, setConfigController, auditController, allTransactionsController,
   adjustSchema, freezeSchema, transfersSchema, approveSchema, rejectSchema, configSchema,
 } from "../controllers/admin.controller.js";
+import {
+  adminListReportsController, adminResolveReportController, adminSetVisibilityController,
+  resolveReportSchema, visibilitySchema,
+} from "../controllers/fraudReport.controller.js";
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -39,4 +43,9 @@ router.get("/config", getConfigController);
 router.put("/config", validate(configSchema), setConfigController);
 router.get("/audit", auditController);
 router.get("/transactions", allTransactionsController);
+
+// Anti-fraud reports
+router.get("/fraud-reports", adminListReportsController);
+router.post("/fraud-reports/:id/resolve", validate(resolveReportSchema), adminResolveReportController);
+router.post("/fraud-reports/:id/visibility", validate(visibilitySchema), adminSetVisibilityController);
 export default router;

@@ -7,6 +7,7 @@ import { logAudit } from "../services/audit.service.js";
 import { getFeeConfig } from "../services/fee.service.js";
 import { pendingVerifications, approveRegistration, rejectRegistration } from "../services/registration.service.js";
 import { adminResetPin } from "../services/pin.service.js";
+import { listReportsForUser } from "../services/fraudReport.service.js";
 import { notifyFreeze, notifyApproval, notifyRejection } from "../whatsapp/whatsapp.service.js";
 
 export const adjustSchema = z.object({
@@ -149,16 +150,17 @@ export async function userProfileController(req: Request, res: Response) {
       idSubmitted: true, idReceivedAt: true, faceVideoSubmitted: true,
       faceVideoReceivedAt: true, rejectionReason: true, reviewedAt: true,
       pinFailedAttempts: true, pinLockedUntil: true, transfersEnabled: true,
-      pinHash: true,
+      pinHash: true, fraudReportCount: true, frozenUntil: true, banned: true,
     },
   });
   if (!user) return res.status(404).json({ error: "User not found" });
-  const [transactions, referrals, auditLogs] = await Promise.all([
+  const [transactions, referrals, auditLogs, fraudReports] = await Promise.all([
     prisma.transaction.findMany({ where: { OR: [{ senderId: user.id }, { receiverId: user.id }] }, orderBy: { createdAt: "desc" }, take: 50 }),
     prisma.referral.findMany({ where: { referrerId: user.id }, include: { referred: { select: { phone: true, username: true } } } }),
     prisma.auditLog.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" }, take: 50 }),
+    listReportsForUser(prisma, user.id),
   ]);
-  res.json({ user, transactions, referrals, auditLogs });
+  res.json({ user, transactions, referrals, auditLogs, fraudReports });
 }
 
 export async function freezeController(req: Request, res: Response) {

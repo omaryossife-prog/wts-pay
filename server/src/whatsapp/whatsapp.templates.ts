@@ -101,6 +101,8 @@ export const ACTIONS = {
   HELP: "menu_help",
   REQUESTS: "menu_requests",
   NEW_REQUEST: "req_new",
+  ESCROW_YES: "escrow_yes",
+  ESCROW_NO: "escrow_no",
   CREATE_PIN: "create_pin",
   CONFIRM_TRANSFER: "confirm_transfer",
   CANCEL: "cancel_action",

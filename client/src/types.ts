@@ -28,6 +28,8 @@ export interface Transaction {
   balanceBefore?: number | null;
   balanceAfter?: number | null;
   createdAt: string;
+  escrowEnabled?: boolean;
+  escrowReleaseAt?: string | null;
   sender?: { phone: string; username: string };
   receiver?: { phone: string; username: string };
 }

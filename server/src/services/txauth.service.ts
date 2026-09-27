@@ -30,7 +30,7 @@ function authId(): string {
 
 export async function createTransferAuthorization(
   db: Db,
-  input: { senderId: string; recipientPhone: string; amount: number; now?: Date }
+  input: { senderId: string; recipientPhone: string; amount: number; escrowEnabled?: boolean; now?: Date }
 ) {
   const client: any = db;
   return client.$transaction(async (tx: any) => {
@@ -80,6 +80,7 @@ export async function createTransferAuthorization(
         total: totalDebit,
         transferIdempotencyKey: crypto.randomUUID(),
         status: "PENDING",
+        escrowEnabled: !!input.escrowEnabled,
         expiresAt: new Date(now.getTime() + cfg.authorizationTtlMinutes * 60000),
       },
     });
@@ -115,6 +116,7 @@ export async function executeAuthorizedTransfer(
       amount: auth.amount,
       idempotencyKey: auth.transferIdempotencyKey, // exact binding - one execution only
       description: "PIN-authorized transfer",
+      escrowEnabled: auth.escrowEnabled,
     });
 
     const authorization = await tx.transactionAuthorization.update({

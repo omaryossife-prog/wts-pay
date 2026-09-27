@@ -3,18 +3,18 @@ import { api } from "../services/api";
 import StatCard from "../components/StatCard";
 import type { AdminStats, ConfigBundle, Transaction, PendingVerification } from "../types";
 
-type Tab = "overview" | "verifications" | "users" | "config" | "audit" | "transactions";
+type Tab = "overview" | "verifications" | "users" | "config" | "audit" | "transactions" | "fraud";
 
 export default function Admin() {
   const [tab, setTab] = useState<Tab>("overview");
-  const tabs: Tab[] = ["overview", "verifications", "users", "config", "audit", "transactions"];
+  const tabs: Tab[] = ["overview", "verifications", "users", "config", "audit", "transactions", "fraud"];
   return (
     <>
       <h1 className="page-title">Admin Dashboard</h1>
       <div className="row" style={{ marginBottom: 16 }}>
         {tabs.map((t) => (
           <button key={t} className={`btn small ${tab === t ? "" : "ghost"}`} onClick={() => setTab(t)}>
-            {t[0].toUpperCase() + t.slice(1)}
+            {t === "fraud" ? "Fraud Reports" : t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
@@ -24,6 +24,7 @@ export default function Admin() {
       {tab === "config" && <Config />}
       {tab === "audit" && <Audit />}
       {tab === "transactions" && <TransactionsTab />}
+      {tab === "fraud" && <FraudReports />}
     </>
   );
 }
@@ -368,29 +369,117 @@ function Audit() {
   );
 }
 
-function TransactionsTab() {
-  const [items, setItems] = useState<Transaction[]>([]);
-  useEffect(() => { api.adminTransactions().then((r) => setItems(r.items)).catch(() => {}); }, []);
+function FraudReports() {
+  const [statusFilter, setStatusFilter] = useState<"PENDING" | "CONFIRMED" | "DISMISSED" | "">("PENDING");
+  const [items, setItems] = useState<any[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+
+  const load = () => {
+    api.adminFraudReports(statusFilter || undefined).then((r) => setItems(r.items)).catch((e) => setError(e.message));
+  };
+  useEffect(() => { load(); }, [statusFilter]);
+
+  const waLink = (phone?: string) => phone ? `https://wa.me/${phone.replace(/[^0-9]/g, "")}` : null;
+
+  const resolve = async (id: string, decision: "CONFIRMED" | "DISMISSED") => {
+    setBusyId(id); setError("");
+    try {
+      await api.adminResolveFraudReport(id, decision, noteDraft[id]);
+      load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleVisible = async (id: string, visible: boolean) => {
+    setBusyId(id);
+    try {
+      await api.adminSetReportVisibility(id, visible);
+      load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="card">
-      <h2>All transactions</h2>
-      <table>
-        <thead><tr><th>Date</th><th>Type</th><th>From</th><th>To</th><th>Amount</th><th>Fee</th><th>Before→After</th><th>Status</th></tr></thead>
-        <tbody>
-          {items.map((t) => (
-            <tr key={t.id}>
-              <td>{new Date(t.createdAt).toLocaleString()}</td>
-              <td>{t.type.replace(/_/g, " ")}</td>
-              <td>{t.sender?.phone ?? "—"}</td>
-              <td>{t.receiver?.phone ?? "—"}</td>
-              <td>{t.amount}</td>
-              <td>{t.fee}</td>
-              <td className="meta">{t.balanceBefore ?? "—"}→{t.balanceAfter ?? "—"}</td>
-              <td><span className={`badge ${t.status === "COMPLETED" ? "green" : "amber"}`}>{t.status}</span></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <h2>Fraud reports</h2>
+      <p className="muted">
+        Read the evidence directly in WhatsApp with both the reporter and the reported user, then decide here.
+        Report #2 confirmed → 30-day freeze. Report #3 confirmed → permanent ban.
+      </p>
+      {error && <div className="error">{error}</div>}
+      <div className="row" style={{ marginBottom: 12 }}>
+        {(["PENDING", "CONFIRMED", "DISMISSED", ""] as const).map((s) => (
+          <button key={s || "all"} className={`btn small ${statusFilter === s ? "" : "ghost"}`} onClick={() => setStatusFilter(s)}>
+            {s || "All"}
+          </button>
+        ))}
+      </div>
+
+      {items.length === 0 && <p className="muted">No reports here.</p>}
+
+      {items.map((r) => (
+        <div key={r.id} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6, borderBottom: "1px solid #eee", paddingBottom: 12, marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <strong>Report #{r.reportNumber} on {r.reportedUser?.username} ({r.reportedUser?.phone})</strong>
+            <span className={`badge ${r.status === "CONFIRMED" ? "red" : r.status === "DISMISSED" ? "green" : "amber"}`}>{r.status}</span>
+          </div>
+          <div className="meta">
+            Transaction: {r.transaction?.amount} EGP on {new Date(r.transaction?.createdAt).toLocaleString()} ·
+            Reported by {r.reporter?.username} ({r.reporter?.phone}) · Filed {new Date(r.createdAt).toLocaleString()}
+          </div>
+          <div className="row">
+            {waLink(r.reporter?.whatsappPhone ?? r.reporter?.phone) && (
+              <a className="btn ghost small" target="_blank" href={waLink(r.reporter?.whatsappPhone ?? r.reporter?.phone)!}>
+                💬 Message reporter
+              </a>
+            )}
+            {waLink(r.reportedUser?.whatsappPhone ?? r.reportedUser?.phone) && (
+              <a className="btn ghost small" target="_blank" href={waLink(r.reportedUser?.whatsappPhone ?? r.reportedUser?.phone)!}>
+                💬 Message reported user
+              </a>
+            )}
+          </div>
+
+          {r.status === "PENDING" && (
+            <>
+              <input
+                placeholder="Admin note (optional)"
+                value={noteDraft[r.id] ?? ""}
+                onChange={(e) => setNoteDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+              />
+              <div className="row">
+                <button className="btn small" disabled={busyId === r.id} onClick={() => resolve(r.id, "CONFIRMED")}>
+                  Confirm fraud
+                </button>
+                <button className="btn ghost small" disabled={busyId === r.id} onClick={() => resolve(r.id, "DISMISSED")}>
+                  Dismiss
+                </button>
+              </div>
+            </>
+          )}
+
+          {r.status === "CONFIRMED" && (
+            <div className="row" style={{ alignItems: "center" }}>
+              <span className="meta">
+                Total confirmed reports on this user: {r.reportedUser?.fraudReportCount}
+                {r.reportedUser?.banned && " · PERMANENTLY BANNED"}
+                {r.reportedUser?.frozenUntil && ` · frozen until ${new Date(r.reportedUser.frozenUntil).toLocaleDateString()}`}
+              </span>
+              <button className="btn ghost small" disabled={busyId === r.id} onClick={() => toggleVisible(r.id, !r.visible)}>
+                {r.visible ? "Hide report" : "Show report"}
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

@@ -90,12 +90,12 @@ export const api = {
   wallet: () =>
     request<{ user: User; notice: string }>("/api/wallet/"),
 
-  quote: (amount: number) =>
-    request<{ amount: number; fee: number; totalDebit: number }>(
+  quote: (amount: number, recipientPhone?: string) =>
+    request<{ amount: number; fee: number; totalDebit: number; warning: string | null }>(
       "/api/wallet/quote",
       {
         method: "POST",
-        body: JSON.stringify({ amount }),
+        body: JSON.stringify({ amount, recipientPhone }),
       }
     ),
 
@@ -103,6 +103,7 @@ export const api = {
     recipientPhone: string;
     amount: number;
     description?: string;
+    escrowEnabled?: boolean;
   }) =>
     request<{ transaction: Transaction; duplicate: boolean }>(
       "/api/wallet/transfer",
@@ -258,6 +259,27 @@ export const api = {
     request<{ ok: boolean }>("/api/wallet/pin", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  reportTransaction: (transactionId: string) =>
+    request<{ report: any }>(`/api/wallet/transactions/${transactionId}/report`, {
+      method: "POST",
+    }),
+
+  // ── أدمن: بلاغات النصب ──────────────────────────────────────────────
+  adminFraudReports: (status?: "PENDING" | "CONFIRMED" | "DISMISSED") =>
+    request<{ items: any[] }>(`/api/admin/fraud-reports${status ? `?status=${status}` : ""}`),
+
+  adminResolveFraudReport: (id: string, decision: "CONFIRMED" | "DISMISSED", adminNote?: string) =>
+    request<{ report: any; reportedUser: any }>(`/api/admin/fraud-reports/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ decision, adminNote }),
+    }),
+
+  adminSetReportVisibility: (id: string, visible: boolean) =>
+    request<{ report: any }>(`/api/admin/fraud-reports/${id}/visibility`, {
+      method: "POST",
+      body: JSON.stringify({ visible }),
     }),
 };
 

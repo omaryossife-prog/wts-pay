@@ -10,6 +10,7 @@ import { prisma } from "../utils/prisma.js";
 import { computeFee } from "../services/fee.service.js";
 import { getLimitsConfig, getMaintenanceConfig } from "../services/config.service.js";
 import { evaluateReferralEligibility } from "../services/referral.service.js";
+import { getFraudWarning } from "../services/wallet.service.js";
 import {
   createTransferAuthorization,
   executeAuthorizedTransfer,
@@ -44,6 +45,7 @@ export const SessionState = {
   // send money with authorization
   SEND_WAIT_PHONE: "SEND_WAIT_PHONE",
   SEND_WAIT_AMOUNT: "SEND_WAIT_AMOUNT",
+  SEND_ESCROW_CHOICE: "SEND_ESCROW_CHOICE",
   SEND_CONFIRMATION: "SEND_CONFIRMATION",
   SEND_PIN: "SEND_PIN",
   // money requests (ask someone to pay you)
@@ -54,6 +56,7 @@ export const SessionState = {
 export type SessionState = (typeof SessionState)[keyof typeof SessionState];
 
 interface WaSessionData {
+  recipientId?: string;
   recipientPhone?: string;
   recipientWtsId?: string;
   recipientName?: string;
@@ -61,6 +64,7 @@ interface WaSessionData {
   fee?: number;
   totalDebit?: number;
   authorizationId?: string;
+  escrowEnabled?: boolean;
   pendingRequestId?: string; // for accepting a specific money request via PIN
   pendingPin?: string; // fallback setup only, never persisted beyond setup
 }
@@ -279,6 +283,7 @@ export async function handlePhoneInput(userId: string, phone: string): Promise<{
   if (recipient.verificationStatus !== "VERIFIED") return { text: "That account is not verified yet.", ok: false };
   if (recipient.transfersEnabled === false) return { text: "That account cannot receive transfers right now.", ok: false };
   await setSession(userId, SessionState.SEND_WAIT_AMOUNT, {
+    recipientId: recipient.id,
     recipientPhone: recipient.phone,
     recipientWtsId: recipient.wtsId ?? undefined,
     recipientName: recipient.fullName ?? recipient.username,
@@ -286,7 +291,7 @@ export async function handlePhoneInput(userId: string, phone: string): Promise<{
   return { text: `Sending to *${recipient.fullName ?? recipient.username}* (${recipient.wtsId ?? recipient.phone}).\nEnter the amount in EGP:`, ok: true };
 }
 
-export async function handleAmountInput(userId: string, raw: string): Promise<{ text: string; summary?: string; amount: number; fee: number; totalDebit: number } | { text: string; ok: false }> {
+export async function handleAmountInput(userId: string, raw: string): Promise<{ text: string; askEscrow: true } | { text: string; ok: false }> {
   const amount = Number(raw.replace(/[^0-9]/g, ""));
   if (!Number.isInteger(amount) || amount <= 0) return { text: "Enter a whole number amount greater than 0, e.g. 500.", ok: false };
   const limits = await getLimitsConfig(prisma);
@@ -295,27 +300,47 @@ export async function handleAmountInput(userId: string, raw: string): Promise<{ 
   }
   const { fee, totalDebit } = await computeFee(prisma, amount);
   const session = await getSession(userId);
-  await setSession(userId, SessionState.SEND_CONFIRMATION, { ...session.data, amount, fee, totalDebit });
-  const summary =
+  const warning = await getFraudWarning(prisma, userId, session.data.recipientId ?? "").catch(() => null);
+  await setSession(userId, SessionState.SEND_ESCROW_CHOICE, { ...session.data, amount, fee, totalDebit });
+  return {
+    text:
+      (warning ? `${warning}\n\n` : "") +
+      "\u{1F6E1}\uFE0F Enable Anti-Fraud protection for this transfer?\n" +
+      "Recommended for people you don't know well — you'll be able to report this transfer if something feels wrong.",
+    askEscrow: true,
+  };
+}
+
+function buildConfirmationSummary(session: { data: WaSessionData }) {
+  const { recipientWtsId, recipientPhone, amount, fee, totalDebit, escrowEnabled } = session.data;
+  return (
     `Confirm Transfer\n` +
-    `Recipient:\n${session.data.recipientWtsId ?? session.data.recipientPhone}\n` +
-    `Amount:\n${amount.toLocaleString()} EGP\n` +
+    `Recipient:\n${recipientWtsId ?? recipientPhone}\n` +
+    `Amount:\n${amount!.toLocaleString()} EGP\n` +
     `Fee:\n${fee} EGP\n` +
-    `Total:\n${totalDebit.toLocaleString()} EGP`;
-  return { text: summary, summary, amount, fee, totalDebit };
+    `Total:\n${totalDebit!.toLocaleString()} EGP` +
+    (escrowEnabled ? `\n\u{1F6E1}\uFE0F Anti-Fraud protection: ON` : "")
+  );
+}
+
+export async function handleEscrowChoice(userId: string, enabled: boolean): Promise<{ text: string; summary: string }> {
+  const session = await getSession(userId);
+  await setSession(userId, SessionState.SEND_CONFIRMATION, { ...session.data, escrowEnabled: enabled });
+  const summary = buildConfirmationSummary({ data: { ...session.data, escrowEnabled: enabled } });
+  return { text: summary, summary };
 }
 
 // Button press "Confirm Transfer" -> create the pending authorization. The
 // transfer itself does NOT execute until the PIN is verified.
 export async function confirmTransfer(userId: string): Promise<{ text: string; authorizationId?: string }> {
   const session = await getSession(userId);
-  const { recipientPhone, amount } = session.data;
+  const { recipientPhone, amount, escrowEnabled } = session.data;
   if (!recipientPhone || !amount) {
     await setSession(userId, SessionState.IDLE, {});
     return { text: "Session expired. Type *menu* to start again." };
   }
   try {
-    const auth = await createTransferAuthorization(prisma, { senderId: userId, recipientPhone, amount });
+    const auth = await createTransferAuthorization(prisma, { senderId: userId, recipientPhone, amount, escrowEnabled });
     await setSession(userId, SessionState.SEND_PIN, { ...session.data, authorizationId: auth.authorizationId });
     return {
       text: `\u{1F512} Confirm WTS Transfer\nEnter your 6-digit WTS PIN to authorize ${auth.amount.toLocaleString()} EGP (total ${auth.total.toLocaleString()} EGP).`,
@@ -499,6 +524,41 @@ export async function handleRequestPinInput(userId: string, raw: string): Promis
       ? `${err.message} Type *menu*.`
       : "Could not complete this request. Type *menu* to try again.";
   }
+}
+
+// ── بلاغات النصب: إشعارات المستخدم المبلَّغ عنه ─────────────────────────
+export async function notifyReportFiled(phone: string) {
+  const { sendTextMessage } = await import("./whatsapp.client.js");
+  await sendTextMessage(
+    phone.replace("+", ""),
+    "\u26A0\uFE0F A complaint was filed against you regarding a recent transaction. " +
+      "Please reply here with any evidence or explanation — our team will review it before taking any action."
+  );
+}
+
+export async function notifyReportResolved(
+  phone: string,
+  status: "CONFIRMED" | "DISMISSED",
+  banned: boolean,
+  frozenUntil: Date | null
+) {
+  const { sendTextMessage } = await import("./whatsapp.client.js");
+  if (status === "DISMISSED") {
+    await sendTextMessage(phone.replace("+", ""), "\u2705 The complaint against you was reviewed and dismissed. No action was taken.");
+    return;
+  }
+  if (banned) {
+    await sendTextMessage(phone.replace("+", ""), "\u274C Your wallet has been permanently disabled following repeated confirmed complaints.");
+    return;
+  }
+  if (frozenUntil) {
+    await sendTextMessage(
+      phone.replace("+", ""),
+      `\u274C A complaint against you was confirmed. Your wallet is frozen until ${frozenUntil.toLocaleDateString()}.`
+    );
+    return;
+  }
+  await sendTextMessage(phone.replace("+", ""), "\u26A0\uFE0F A complaint against you was confirmed. This is recorded on your account.");
 }
 
 export async function notifyFreeze(userPhone: string, frozen: boolean) {

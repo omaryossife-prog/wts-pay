@@ -57,6 +57,12 @@ async function creditInternal(
 async function assertCanTransfer(tx: any, userId: string, role: "sender" | "receiver") {
   const u = await tx.user.findUnique({ where: { id: userId } });
   if (!u) throw new WalletError("USER_NOT_FOUND", `${role === "sender" ? "Sender" : "Recipient"} not found.`);
+  if (u.banned) {
+    throw new WalletError("ACCOUNT_FROZEN", `${role === "sender" ? "Your" : "Recipient"} account is disabled.`);
+  }
+  if (u.frozenUntil && u.frozenUntil > new Date()) {
+    throw new WalletError("ACCOUNT_FROZEN", `${role === "sender" ? "Your" : "Recipient"} account is frozen.`);
+  }
   if (u.status !== "ACTIVE") throw new WalletError("ACCOUNT_FROZEN", `${role === "sender" ? "Your" : "Recipient"} account is frozen.`);
   if (u.verificationStatus !== "VERIFIED") {
     throw new WalletError("ACCOUNT_UNVERIFIED", "Account is not verified yet.");
@@ -67,12 +73,44 @@ async function assertCanTransfer(tx: any, userId: string, role: "sender" | "rece
   return u;
 }
 
+// مجموع الحجوزات النشطة (escrow) على المستخدم ده — الرصيد المتاح فعليًا
+// للسحب/الإرسال بعد استبعادها. بيفضل الجزء المحجوز موجود في الرصيد، بس
+// المستخدم مش يقدر يبعت مبلغ يخليه يقل عنه، من غير ما نقوله إن ده حجز.
+async function getActiveHoldAmount(tx: any, userId: string): Promise<number> {
+  const rows = await tx.transaction.findMany({
+    where: { receiverId: userId, escrowEnabled: true, escrowReleaseAt: { gt: new Date() } },
+    select: { amount: true },
+  });
+  return rows.reduce((sum: number, r: any) => sum + r.amount, 0);
+}
+
+// بعد أي استلام فلوس ناجح، نشوف لو عليه بلاغ نصب مؤكّد ولسه ظاهر — ولو
+// عمل عدد كافي من عمليات استلام نظيفة (في أيام مختلفة) من بعد التأكيد،
+// نشيل البلاغ من الظهور تلقائيًا (بيفضل محفوظ في الداشبورد كتاريخ).
+async function checkAutoClearReports(tx: any, userId: string) {
+  const report = await tx.fraudReport.findFirst({
+    where: { reportedUserId: userId, status: "CONFIRMED", clearedAt: null },
+    orderBy: { resolvedAt: "desc" },
+  });
+  if (!report?.resolvedAt) return;
+  const threshold = report.reportNumber >= 2 ? 15 : 10;
+  const rows = await tx.transaction.findMany({
+    where: { receiverId: userId, type: "TRANSFER", status: "COMPLETED", createdAt: { gt: report.resolvedAt } },
+    select: { createdAt: true },
+  });
+  const distinctDays = new Set(rows.map((r: any) => r.createdAt.toISOString().slice(0, 10)));
+  if (distinctDays.size >= threshold) {
+    await tx.fraudReport.update({ where: { id: report.id }, data: { clearedAt: new Date() } });
+  }
+}
+
 export interface TransferInput {
   senderId: string;
   recipientPhone: string;
   amount: number;
   idempotencyKey: string;
   description?: string;
+  escrowEnabled?: boolean; // مضاد النصب: حجز المبلغ 48 ساعة عند المستلم
 }
 
 export interface TransferResult {
@@ -103,9 +141,11 @@ export async function transferInTx(tx: any, input: TransferInput): Promise<Trans
   // 3) Fee via the single dedicated fee service
   const { fee, totalDebit } = await computeFee(tx, input.amount);
 
-  // 4) Atomic guarded debit
+  // 4) Atomic guarded debit — لازم يفضل معاه بعد التحويل ما يكفي أي حجوزات
+  //    نشطة عليه (من غير ما نقوله إن ده السبب لو فشلت العملية).
+  const heldAmount = await getActiveHoldAmount(tx, sender.id);
   const debit = await tx.user.updateMany({
-    where: { id: sender.id, status: "ACTIVE", demoBalance: { gte: totalDebit } },
+    where: { id: sender.id, status: "ACTIVE", demoBalance: { gte: totalDebit + heldAmount } },
     data: { demoBalance: { decrement: totalDebit } },
   });
   if (debit.count !== 1) {
@@ -133,8 +173,12 @@ export async function transferInTx(tx: any, input: TransferInput): Promise<Trans
       idempotencyKey: input.idempotencyKey,
       description: input.description ?? "Wallet transfer",
       status: "COMPLETED",
+      escrowEnabled: !!input.escrowEnabled,
+      escrowReleaseAt: input.escrowEnabled ? new Date(Date.now() + 48 * 3600 * 1000) : null,
     },
   });
+
+  await checkAutoClearReports(tx, receiver.id);
 
   return { transaction, duplicate: false };
 }
@@ -142,6 +186,28 @@ export async function transferInTx(tx: any, input: TransferInput): Promise<Trans
 export async function transfer(db: Db, input: TransferInput): Promise<TransferResult> {
   const client: any = db;
   return client.$transaction((tx: any) => transferInTx(tx, input));
+}
+
+// تحذير للمرسل الجديد بس — لو عليه بلاغ نصب مؤكّد وظاهر، ولو المرسل مش
+// اتعامل مع المستلم ده مرتين قبل كده (يبقى تعامل معاه ووثق فيه أصلاً).
+export async function getFraudWarning(db: Db, viewerId: string, targetUserId: string): Promise<string | null> {
+  const client: any = db;
+  const activeReport = await client.fraudReport.findFirst({
+    where: { reportedUserId: targetUserId, status: "CONFIRMED", visible: true, clearedAt: null },
+  });
+  if (!activeReport) return null;
+  const priorCount = await client.transaction.count({
+    where: {
+      OR: [
+        { senderId: viewerId, receiverId: targetUserId },
+        { senderId: targetUserId, receiverId: viewerId },
+      ],
+      type: "TRANSFER",
+      status: "COMPLETED",
+    },
+  });
+  if (priorCount >= 2) return null;
+  return "\u26A0\uFE0F This account has an active fraud report. Proceed with caution.";
 }
 
 export async function creditReward(

@@ -6,7 +6,8 @@ export default function Send() {
   const nav = useNavigate();
   const [recipientPhone, setRecipientPhone] = useState("");
   const [amount, setAmount] = useState("");
-  const [quote, setQuote] = useState<{ amount: number; fee: number; totalDebit: number } | null>(null);
+  const [escrowEnabled, setEscrowEnabled] = useState(false);
+  const [quote, setQuote] = useState<{ amount: number; fee: number; totalDebit: number; warning: string | null } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
@@ -17,7 +18,7 @@ export default function Send() {
     const n = Number(amount);
     if (!Number.isInteger(n) || n <= 0) return setError("Enter a whole amount greater than 0.");
     try {
-      setQuote(await api.quote(n));
+      setQuote(await api.quote(n, recipientPhone || undefined));
     } catch (err: any) {
       setError(err.message);
     }
@@ -27,7 +28,7 @@ export default function Send() {
     setError("");
     setBusy(true);
     try {
-      const r = await api.transfer({ recipientPhone, amount: Number(amount) });
+      const r = await api.transfer({ recipientPhone, amount: Number(amount), escrowEnabled });
       setDone(`Sent ${r.transaction.amount} EGP (fee ${r.transaction.fee} EGP).`);
       setTimeout(() => nav("/transactions"), 900);
     } catch (err: any) {
@@ -45,16 +46,30 @@ export default function Send() {
         {error && <div className="error">{error}</div>}
         <div className="field">
           <label>Recipient phone number</label>
-          <input value={recipientPhone} onChange={(e) => setRecipientPhone(e.target.value)} placeholder="+2010xxxxxxx" />
+          <input value={recipientPhone} onChange={(e) => { setRecipientPhone(e.target.value); setQuote(null); }} placeholder="+2010xxxxxxx" />
         </div>
         <div className="field">
           <label>Amount (EGP)</label>
           <input inputMode="numeric" value={amount} onChange={(e) => { setAmount(e.target.value); setQuote(null); }} placeholder="500" />
         </div>
+
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "12px 0", cursor: "pointer" }}>
+          <input type="checkbox" checked={escrowEnabled} onChange={(e) => setEscrowEnabled(e.target.checked)} style={{ marginTop: 3 }} />
+          <span>
+            <strong>🛡️ Anti-Fraud protection</strong>
+            <br />
+            <small className="muted">
+              If something feels wrong after sending, you'll be able to report this transfer.
+              Recommended for payments to people you don't know well.
+            </small>
+          </span>
+        </label>
+
         <button className="btn secondary" onClick={getQuote}>Calculate fee</button>
 
         {quote && (
           <div style={{ marginTop: 16 }}>
+            {quote.warning && <div className="error">{quote.warning}</div>}
             <div className="list-row"><span>Amount</span><strong>{quote.amount} EGP</strong></div>
             <div className="list-row"><span>Fee</span><strong>{quote.fee} EGP</strong></div>
             <div className="list-row"><span>Total debit</span><strong>{quote.totalDebit} EGP</strong></div>

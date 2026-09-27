@@ -17,7 +17,7 @@ import {
   handleIdFront, handleIdBack, handleFaceVideo,
   handlePinCreateInput, handlePinConfirmInput,
   getBalanceText, getTransactionsText, getReferralText, getAccountText, HELP_TEXT,
-  beginSendMoney, handlePhoneInput, handleAmountInput,
+  beginSendMoney, handlePhoneInput, handleAmountInput, handleEscrowChoice,
   confirmTransfer, cancelTransfer, handleAuthorizationPin,
   getRequestsMenuRows, beginMoneyRequest, handleRequestPhoneInput, handleRequestAmountInput,
   viewIncomingRequest, rejectIncomingRequest, beginAcceptRequest, handleRequestPinInput,
@@ -277,13 +277,25 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
     }
     case SessionState.SEND_WAIT_AMOUNT: {
       const r = await handleAmountInput(user.id, text);
-      if ("summary" in r) {
-        await sendButtonMessage(to, r.summary, [
-          { id: ACTIONS.CONFIRM_TRANSFER, title: "🔐 Confirm Transfer" },
-          { id: ACTIONS.CANCEL, title: "❌ Cancel" },
+      if ("askEscrow" in r) {
+        await sendButtonMessage(to, r.text, [
+          { id: ACTIONS.ESCROW_YES, title: "\u{1F6E1}\uFE0F Yes, protect" },
+          { id: ACTIONS.ESCROW_NO, title: "No, skip" },
         ]);
       } else {
         await sendTextMessage(to, r.text);
+      }
+      return;
+    }
+    case SessionState.SEND_ESCROW_CHOICE: {
+      if (replyId === ACTIONS.ESCROW_YES || replyId === ACTIONS.ESCROW_NO) {
+        const r = await handleEscrowChoice(user.id, replyId === ACTIONS.ESCROW_YES);
+        await sendButtonMessage(to, r.summary, [
+          { id: ACTIONS.CONFIRM_TRANSFER, title: "\u{1F510} Confirm Transfer" },
+          { id: ACTIONS.CANCEL, title: "\u274C Cancel" },
+        ]);
+      } else {
+        await sendTextMessage(to, "Tap Yes or No to continue.");
       }
       return;
     }

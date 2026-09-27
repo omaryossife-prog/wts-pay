@@ -67,6 +67,12 @@ enum TransferRequestStatus {
   EXPIRED
 }
 
+enum ReportStatus {
+  PENDING    // filed, awaiting admin decision
+  CONFIRMED  // admin confirmed fraud
+  DISMISSED  // admin dismissed the report
+}
+
 model User {
   id            String        @id @default(uuid())
   phone         String        @unique
@@ -103,6 +109,11 @@ model User {
   // ---- Per-user transfer switch (admin controllable) ----
   transfersEnabled Boolean    @default(true)
 
+  // ---- Anti-fraud escalation ----
+  fraudReportCount Int        @default(0) // confirmed reports so far (drives escalation)
+  frozenUntil      DateTime?              // temporary freeze end (2nd confirmed report -> +30 days)
+  banned           Boolean    @default(false) // permanent (3rd confirmed report)
+
   referralCode  String        @unique
   referredById  String?
   referralCount Int           @default(0)
@@ -131,6 +142,8 @@ model User {
   authorizationsRecv   TransactionAuthorization[] @relation("AuthRecipient")
   requestsMade         TransferRequest[] @relation("RequestMadeBy")
   requestsReceived     TransferRequest[] @relation("RequestSentTo")
+  reportsFiled         FraudReport[]     @relation("ReportsFiled")
+  reportsAgainst       FraudReport[]     @relation("ReportsAgainst")
 
   @@map("users")
 }
@@ -150,8 +163,15 @@ model Transaction {
   balanceAfter   Int?
   createdAt      DateTime          @default(now())
 
+  // ---- Anti-fraud "escrow" hold: money lands in the receiver's balance
+  // immediately, but this exact amount stays untouchable for 48h so the
+  // sender has time to report before it can be withdrawn. ----
+  escrowEnabled   Boolean   @default(false)
+  escrowReleaseAt DateTime?
+
   sender   User? @relation("SentTransactions", fields: [senderId], references: [id])
   receiver User? @relation("ReceivedTransactions", fields: [receiverId], references: [id])
+  fraudReports FraudReport[]
 
   @@index([senderId, createdAt])
   @@index([receiverId, createdAt])
@@ -173,6 +193,7 @@ model TransactionAuthorization {
   total                  Int
   transferIdempotencyKey String              @unique
   status                 AuthorizationStatus @default(PENDING)
+  escrowEnabled          Boolean             @default(false)
   createdAt              DateTime            @default(now())
   expiresAt              DateTime
   usedAt                 DateTime?
@@ -221,6 +242,32 @@ model TransferRequest {
   @@index([payerId, status])
   @@index([requesterId, status])
   @@map("transfer_requests")
+}
+
+// بلاغ نصب: المرسل بيبلغ عن عملية بالذات (لازم تكون escrow-enabled).
+// reportNumber = ترتيب البلاغ ده للمستلم (1، 2، أو 3) لو تأكد.
+// visible: تحكم الأدمن اليدوي (يقدر يفعّل/يشيل أي بلاغ بنفسه في أي وقت).
+// clearedAt: بيتحط تلقائيًا بعد ما المستلم يعمل عدد كافي من عمليات استلام
+// نظيفة في أيام مختلفة (10 للبلاغ الأول، 15 للثاني) — العدد ميتقالش للمستخدم.
+model FraudReport {
+  id             String       @id @default(uuid())
+  transactionId  String
+  reporterId     String
+  reportedUserId String
+  reportNumber   Int
+  status         ReportStatus @default(PENDING)
+  visible        Boolean      @default(true)
+  adminNote      String?
+  createdAt      DateTime     @default(now())
+  resolvedAt     DateTime?
+  clearedAt      DateTime?
+
+  transaction  Transaction @relation(fields: [transactionId], references: [id])
+  reporter     User        @relation("ReportsFiled", fields: [reporterId], references: [id])
+  reportedUser User        @relation("ReportsAgainst", fields: [reportedUserId], references: [id])
+
+  @@index([reportedUserId, status])
+  @@map("fraud_reports")
 }
 
 // Key-value store for admin-configurable settings (fees, rewards, campaigns,

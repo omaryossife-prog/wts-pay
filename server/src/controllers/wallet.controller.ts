@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "../utils/prisma.js";
-import { transfer } from "../services/wallet.service.js";
+import { transfer, getFraudWarning } from "../services/wallet.service.js";
 import { evaluateReferralEligibility } from "../services/referral.service.js";
 import { computeFee } from "../services/fee.service.js";
 import { maskPhone } from "../utils/phone-mask.js";
@@ -17,10 +17,12 @@ export const transferSchema = z.object({
   recipientPhone: z.string().min(8).max(20),
   amount: z.number().int().positive().max(1_000_000),
   description: z.string().max(200).optional(),
+  escrowEnabled: z.boolean().optional(),
 });
 
 export const quoteSchema = z.object({
   amount: z.number().int().positive().max(1_000_000),
+  recipientPhone: z.string().min(8).max(20).optional(),
 });
 
 export async function getWalletController(req: Request, res: Response) {
@@ -53,7 +55,13 @@ export async function setPinController(req: Request, res: Response) {
 
 export async function quoteController(req: Request, res: Response) {
   const { fee, totalDebit } = await computeFee(prisma, req.body.amount);
-  res.json({ amount: req.body.amount, fee, totalDebit });
+  let warning: string | null = null;
+  if (req.body.recipientPhone) {
+    const phone = String(req.body.recipientPhone).replace(/[\s\-()]/g, "");
+    const recipient = await prisma.user.findUnique({ where: { phone } });
+    if (recipient) warning = await getFraudWarning(prisma, req.user!.userId, recipient.id);
+  }
+  res.json({ amount: req.body.amount, fee, totalDebit, warning });
 }
 
 export async function transferController(req: Request, res: Response) {
@@ -63,6 +71,7 @@ export async function transferController(req: Request, res: Response) {
     amount: req.body.amount,
     idempotencyKey: req.idempotencyKey!,
     description: req.body.description,
+    escrowEnabled: req.body.escrowEnabled,
   });
   // Referral activation hook: a completed transfer may make a referral eligible.
   if (!duplicate) {
