@@ -369,6 +369,33 @@ function Audit() {
   );
 }
 
+function TransactionsTab() {
+  const [items, setItems] = useState<Transaction[]>([]);
+  useEffect(() => { api.adminTransactions().then((r) => setItems(r.items)).catch(() => {}); }, []);
+  return (
+    <div className="card">
+      <h2>All transactions</h2>
+      <table>
+        <thead><tr><th>Date</th><th>Type</th><th>From</th><th>To</th><th>Amount</th><th>Fee</th><th>Before→After</th><th>Status</th></tr></thead>
+        <tbody>
+          {items.map((t) => (
+            <tr key={t.id}>
+              <td>{new Date(t.createdAt).toLocaleString()}</td>
+              <td>{t.type.replace(/_/g, " ")}</td>
+              <td>{t.sender?.phone ?? "—"}</td>
+              <td>{t.receiver?.phone ?? "—"}</td>
+              <td>{t.amount}</td>
+              <td>{t.fee}</td>
+              <td className="meta">{t.balanceBefore ?? "—"}→{t.balanceAfter ?? "—"}</td>
+              <td><span className={`badge ${t.status === "COMPLETED" ? "green" : "amber"}`}>{t.status}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function FraudReports() {
   const [statusFilter, setStatusFilter] = useState<"PENDING" | "CONFIRMED" | "DISMISSED" | "">("PENDING");
   const [items, setItems] = useState<any[]>([]);

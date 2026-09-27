@@ -9,7 +9,7 @@ import { prisma } from "../utils/prisma.js";
 import { logger } from "../utils/logger.js";
 import { sendTextMessage, sendButtonMessage, sendListMessage, markAsRead } from "./whatsapp.client.js";
 import { ACTIONS, MAIN_MENU_ROWS, GREETING_TEXT, START_BUTTON, NUMBER_NO_TEXT } from "./whatsapp.templates.js";
-import { sendPinFlow, sendWtsActionsFlow } from "./whatsapp.flows.js";
+import { sendPinFlow, sendSendMoneyFlow, sendConfirmPinFlow } from "./whatsapp.flows.js";
 import {
   SessionState, getUserByWaIdentity, getSession, setSession,
   maintenanceActive,
@@ -225,10 +225,10 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
     return;
   }
 
-  // Prefer the native WhatsApp Flow for Send Money when configured; keep the
-  // existing chat flow as the documented fallback.
+  // Send Money is its own standalone Flow now — PIN confirmation happens
+  // afterwards as a separate, standalone Flow (never a screen inside this one).
   if (replyId === ACTIONS.SEND_MONEY) {
-    const sent = await sendWtsActionsFlow(to, user.id);
+    const sent = await sendSendMoneyFlow(to, user.id);
     if (sent) return;
   }
 
@@ -253,7 +253,10 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
   }
   if (replyId?.startsWith("req_accept_")) {
     const requestId = replyId.slice("req_accept_".length);
-    await sendTextMessage(to, await beginAcceptRequest(user.id, requestId));
+    const sent = await sendConfirmPinFlow(to, user.id, "request", requestId);
+    if (!sent) {
+      await sendTextMessage(to, await beginAcceptRequest(user.id, requestId));
+    }
     return;
   }
   if (replyId?.startsWith("req_reject_")) {

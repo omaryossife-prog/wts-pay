@@ -9,6 +9,7 @@ import { getLimitsConfig, getMaintenanceConfig } from "../services/config.servic
 import { evaluateReferralEligibility } from "../services/referral.service.js";
 import { createTransferAuthorization, executeAuthorizedTransfer } from "../services/txauth.service.js";
 import { verifyPin, PinError } from "../services/pin.service.js";
+import { acceptTransferRequest, TransferRequestError } from "../services/transferRequest.service.js";
 import { WalletError } from "../services/wallet.service.js";
 import { normalizeWaPhone } from "../services/registration.service.js";
 import { sendTextMessage } from "./whatsapp.client.js";
@@ -19,6 +20,7 @@ export const WTS_FLOW_ACTIONS = {
   SEND_MONEY: "SEND_MONEY",
   CREATE_TRANSFER: "CREATE_TRANSFER",
   CONFIRM_TRANSFER: "CONFIRM_TRANSFER",
+  ACCEPT_REQUEST: "ACCEPT_REQUEST",
   VERIFY_PIN: "VERIFY_PIN",
   GET_TRANSACTIONS: "GET_TRANSACTIONS",
   GET_REFERRALS: "GET_REFERRALS",
@@ -189,12 +191,13 @@ export async function executeWtsAction(userId: string, action: string, payload: 
       case WTS_FLOW_ACTIONS.CREATE_TRANSFER: {
         const recipientPhone = String(payload.recipientPhone ?? payload.recipient_phone ?? "");
         const amount = parseAmount(payload.amount);
+        const escrowEnabled = payload.escrowEnabled === true || payload.escrow_enabled === true || payload.escrow_enabled === "yes";
         if (!recipientPhone || !amount) return fail("REJECTED", "بيانات التحويل غير مكتملة");
         const limits = await getLimitsConfig(prisma);
         if (amount < limits.minTransfer || amount > limits.maxTransfer) {
           return fail("REJECTED", `المبلغ يجب أن يكون بين ${limits.minTransfer} و ${limits.maxTransfer} جنيه`);
         }
-        const auth = await createTransferAuthorization(prisma, { senderId: userId, recipientPhone, amount });
+        const auth = await createTransferAuthorization(prisma, { senderId: userId, recipientPhone, amount, escrowEnabled });
         return ok({
           message: "راجع بيانات التحويل ثم اضغط تأكيد.",
           authorizationId: auth.authorizationId,
@@ -234,10 +237,30 @@ export async function executeWtsAction(userId: string, action: string, payload: 
         });
       }
 
+      case WTS_FLOW_ACTIONS.ACCEPT_REQUEST: {
+        const requestId = String(payload.requestId ?? payload.request_id ?? "");
+        const pin = String(payload.pin ?? "").trim();
+        if (!requestId) return fail("REJECTED", "لا يوجد طلب تحويل صالح");
+        if (!/^\d{6}$/.test(pin)) return fail("INVALID_PIN", "الرمز السري يجب أن يكون 6 أرقام");
+        const { transaction } = await acceptTransferRequest(prisma, { requestId, payerId: userId, pin });
+        const balanceAfter = await currentBalance(userId);
+        return ok({
+          message: "تم قبول الطلب وتحويل المبلغ",
+          transactionId: transaction.idempotencyKey,
+          amount: transaction.amount,
+          fee: transaction.fee,
+          total: transaction.totalDebit,
+          balanceAfter,
+        });
+      }
+
       default:
         return fail("ERROR", "إجراء غير معروف");
     }
   } catch (err) {
+    if (err instanceof TransferRequestError) {
+      return fail("REJECTED", err.message);
+    }
     const response = errorResponse(err);
     if (action === WTS_FLOW_ACTIONS.CONFIRM_TRANSFER && !response.success) {
       const balanceAfter = await currentBalance(userId).catch(() => undefined);
