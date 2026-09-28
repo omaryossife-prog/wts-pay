@@ -226,6 +226,12 @@ export const api = {
       body: JSON.stringify({ userId }),
     }),
 
+  adminResetFraudStatus: (userId: string) =>
+    request("/api/admin/users/reset-fraud-status", {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    }),
+
   adminTransactions: (type = "", q = "") => {
     const params = new URLSearchParams();
     if (type) params.set("type", type);

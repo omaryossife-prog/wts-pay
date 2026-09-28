@@ -201,6 +201,7 @@ function Users() {
                 <button className="btn small" onClick={() => act(() => api.adminUnfreeze(detail.user.id), "Account unfrozen")}>Unfreeze Account</button>
               )}
               <button className="btn small ghost" onClick={() => act(() => api.adminResetPin(detail.user.id), "PIN reset - user must create a new PIN")}>Reset PIN</button>
+              <button className="btn small ghost" onClick={() => act(() => api.adminResetFraudStatus(detail.user.id), "Fraud status reset - counter, freeze and ban cleared")}>Reset fraud status</button>
               {detail.user.transfersEnabled ? (
                 <button className="btn small ghost" onClick={() => act(() => api.adminSetTransfers(detail.user.id, false), "Transfers disabled")}>Disable Transfers</button>
               ) : (

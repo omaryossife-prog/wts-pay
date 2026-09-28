@@ -13,6 +13,7 @@ import { acceptTransferRequest, TransferRequestError } from "../services/transfe
 import { WalletError } from "../services/wallet.service.js";
 import { normalizeWaPhone } from "../services/registration.service.js";
 import { sendTextMessage } from "./whatsapp.client.js";
+import { notifyTransferReceived } from "./whatsapp.service.js";
 import { logger } from "../utils/logger.js";
 
 export const WTS_FLOW_ACTIONS = {
@@ -223,7 +224,10 @@ export async function executeWtsAction(userId: string, action: string, payload: 
         if (!/^\d{6}$/.test(pin)) return fail("INVALID_PIN", "الرمز السري يجب أن يكون 6 أرقام");
         await verifyPin(prisma, { userId, pin });
         const { authorization, transaction, duplicate } = await executeAuthorizedTransfer(prisma, { authorizationId, senderId: userId });
-        if (!duplicate) await evaluateReferralEligibility(prisma, userId).catch(() => {});
+        if (!duplicate) {
+          await evaluateReferralEligibility(prisma, userId).catch(() => {});
+          await notifyTransferReceived(transaction.id).catch(() => {});
+        }
         const balanceAfter = await currentBalance(userId);
         return ok({
           message: duplicate ? "تمت معالجة هذا التحويل مسبقًا." : "تم التحويل بنجاح",
@@ -243,6 +247,7 @@ export async function executeWtsAction(userId: string, action: string, payload: 
         if (!requestId) return fail("REJECTED", "لا يوجد طلب تحويل صالح");
         if (!/^\d{6}$/.test(pin)) return fail("INVALID_PIN", "الرمز السري يجب أن يكون 6 أرقام");
         const { transaction } = await acceptTransferRequest(prisma, { requestId, payerId: userId, pin });
+        await notifyTransferReceived(transaction.id).catch(() => {});
         const balanceAfter = await currentBalance(userId);
         return ok({
           message: "تم قبول الطلب وتحويل المبلغ",

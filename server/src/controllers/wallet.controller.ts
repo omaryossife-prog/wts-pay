@@ -3,6 +3,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "../utils/prisma.js";
 import { transfer, getFraudWarning } from "../services/wallet.service.js";
+import { notifyTransferReceived } from "../whatsapp/whatsapp.service.js";
 import { evaluateReferralEligibility } from "../services/referral.service.js";
 import { computeFee } from "../services/fee.service.js";
 import { maskPhone } from "../utils/phone-mask.js";
@@ -76,6 +77,7 @@ export async function transferController(req: Request, res: Response) {
   // Referral activation hook: a completed transfer may make a referral eligible.
   if (!duplicate) {
     await evaluateReferralEligibility(prisma, req.user!.userId).catch(() => {});
+    await notifyTransferReceived(transaction.id).catch(() => {});
   }
   res.status(duplicate ? 200 : 201).json({ transaction, duplicate });
 }

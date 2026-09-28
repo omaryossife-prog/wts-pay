@@ -10,7 +10,7 @@ import {
   acceptTransferRequest,
 } from "../services/transferRequest.service.js";
 import { maskPhone } from "../utils/phone-mask.js";
-import { notifyMoneyRequest, notifyRequestAccepted, notifyRequestRejected } from "../whatsapp/whatsapp.service.js";
+import { notifyMoneyRequest, notifyTransferReceived, notifyRequestRejected } from "../whatsapp/whatsapp.service.js";
 
 export const createRequestSchema = z.object({
   payerPhone: z.string().min(8).max(20),
@@ -72,12 +72,12 @@ export async function cancelRequestController(req: Request, res: Response) {
 }
 
 export async function acceptRequestController(req: Request, res: Response) {
-  const { request, transaction, requester } = await acceptTransferRequest(prisma, {
+  const { request, transaction } = await acceptTransferRequest(prisma, {
     requestId: req.params.id,
     payerId: req.user!.userId,
     pin: req.body.pin,
     ip: req.ip,
   });
-  await notifyRequestAccepted(requester.whatsappPhone ?? requester.phone, request.amount).catch(() => {});
+  await notifyTransferReceived(transaction.id).catch(() => {});
   res.json({ request, transaction });
 }

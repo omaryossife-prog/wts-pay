@@ -511,9 +511,9 @@ export async function handleRequestPinInput(userId: string, raw: string): Promis
     return "Session expired. Type *menu* to start again.";
   }
   try {
-    const { transaction, requester } = await acceptTransferRequest(prisma, { requestId, payerId: userId, pin });
+    const { transaction } = await acceptTransferRequest(prisma, { requestId, payerId: userId, pin });
     await setSession(userId, SessionState.IDLE, {});
-    await notifyRequestAccepted(requester.whatsappPhone ?? requester.phone, transaction.amount).catch(() => {});
+    await notifyTransferReceived(transaction.id).catch(() => {});
     return `\u2705 Accepted. ${transaction.amount.toLocaleString()} EGP sent. Type *menu* for the main menu.`;
   } catch (err: any) {
     if (err instanceof PinError) {
@@ -593,6 +593,29 @@ export async function notifyMoneyRequest(phone: string, requesterName: string, a
   await sendTextMessage(
     phone.replace("+", ""),
     `\u{1F4E9} ${requesterName} is requesting ${amount} EGP from you on WTS Pay.\nOpen the app to accept or reject this request.`
+  );
+}
+
+// يُستدعى بعد أي تحويل ناجح (من الموقع أو الواتساب، تحويل مباشر أو قبول
+// طلب تحويل) عشان يوصل للمستلم إشعار: مين حوّل له، بكام، ورصيده بقى قد إيه.
+export async function notifyTransferReceived(transactionId: string): Promise<void> {
+  const t = await prisma.transaction.findUnique({
+    where: { id: transactionId },
+    include: {
+      sender: { select: { fullName: true, username: true } },
+      receiver: { select: { whatsappPhone: true, phone: true } },
+    },
+  });
+  if (!t || !t.receiver) return;
+  const to = (t.receiver.whatsappPhone ?? t.receiver.phone ?? "").replace("+", "");
+  if (!to) return;
+  const senderName = t.sender?.fullName ?? t.sender?.username ?? "Someone";
+  const balance = t.receiverBalanceAfter;
+  const { sendTextMessage } = await import("./whatsapp.client.js");
+  await sendTextMessage(
+    to,
+    `\u{1F4B0} You received ${t.amount.toLocaleString()} EGP from ${senderName}.` +
+      (balance !== null && balance !== undefined ? `\nNew balance: ${balance.toLocaleString()} EGP.` : "")
   );
 }
 

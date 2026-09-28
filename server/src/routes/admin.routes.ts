@@ -4,7 +4,7 @@ import { requireAuth, requireAdmin } from "../middleware/auth.middleware.js";
 import { validate } from "../middleware/validate.middleware.js";
 import {
   statsController, searchUsersController, userProfileController,
-  freezeController, unfreezeController, setTransfersController, resetPinController,
+  freezeController, unfreezeController, setTransfersController, resetPinController, resetFraudStatusController,
   adjustController, reverseController,
   pendingVerificationsController, approveController, rejectController,
   getConfigController, setConfigController, auditController, allTransactionsController,
@@ -31,6 +31,7 @@ router.post("/users/freeze", validate(freezeSchema), freezeController);
 router.post("/users/unfreeze", validate(freezeSchema), unfreezeController);
 router.post("/users/transfers", validate(transfersSchema), setTransfersController);
 router.post("/users/reset-pin", validate(freezeSchema), resetPinController);
+router.post("/users/reset-fraud-status", validate(freezeSchema), resetFraudStatusController);
 router.post("/adjust", validate(adjustSchema), adjustController);
 router.post("/reverse", validate(reverseSchema), reverseController);
 

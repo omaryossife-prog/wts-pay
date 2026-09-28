@@ -363,6 +363,29 @@ export async function reverseReward(
   });
 }
 
+// تصفير كامل لحالة مضاد النصب على المستخدم — للاستخدام لما الأدمن يعدّل
+// جدول fraud_reports يدويًا ويحتاج يرجّع العداد (fraudReportCount) والتجميد
+// والحظر لوضعهم الطبيعي، لأن الحقول دي على المستخدم نفسه ومنفصلة تمامًا
+// عن صفوف جدول fraud_reports.
+export async function resetFraudStatus(
+  db: Db,
+  input: { adminId: string; userId: string; ip?: string }
+) {
+  const client: any = db;
+  const user = await client.user.update({
+    where: { id: input.userId },
+    data: { fraudReportCount: 0, frozenUntil: null, banned: false },
+  });
+  await logAudit(client, {
+    adminId: input.adminId,
+    userId: user.id,
+    action: "FRAUD_STATUS_RESET",
+    ip: input.ip,
+    detail: {},
+  });
+  return { id: user.id, fraudReportCount: user.fraudReportCount, frozenUntil: user.frozenUntil, banned: user.banned };
+}
+
 // Admin freeze/unfreeze - logged with spec event names.
 export async function setFrozen(
   db: Db,
@@ -371,7 +394,11 @@ export async function setFrozen(
   const client: any = db;
   const user = await client.user.update({
     where: { id: input.userId },
-    data: { status: input.frozen ? "FROZEN" : "ACTIVE" },
+    data: input.frozen
+      ? { status: "FROZEN" }
+      // إلغاء التجميد لازم يشيل frozenUntil كمان (تجميد النصب المؤقت)،
+      // مش بس يرجّع status — وإلا الحساب يفضل متجمد فعليًا من غير أي رسالة.
+      : { status: "ACTIVE", frozenUntil: null },
   });
   await logAudit(client, {
     adminId: input.adminId,

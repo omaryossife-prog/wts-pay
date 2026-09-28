@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
-import { adjustBalance, reverseReward, setFrozen, setTransfersEnabled } from "../services/wallet.service.js";
+import { adjustBalance, reverseReward, setFrozen, setTransfersEnabled, resetFraudStatus } from "../services/wallet.service.js";
 import { setConfig, getReferralConfig, getSignupRewardConfig, getReferralRewardConfig, getSecurityConfig, getLimitsConfig, getMaintenanceConfig } from "../services/config.service.js";
 import { logAudit } from "../services/audit.service.js";
 import { getFeeConfig } from "../services/fee.service.js";
@@ -185,6 +185,15 @@ export async function unfreezeController(req: Request, res: Response) {
     notify: async (user, frozen) => {
       if (user.whatsappPhone) await notifyFreeze(user.whatsappPhone, frozen);
     },
+  });
+  res.json(result);
+}
+
+export async function resetFraudStatusController(req: Request, res: Response) {
+  const result = await resetFraudStatus(prisma, {
+    adminId: req.user!.userId,
+    userId: req.body.userId,
+    ip: req.ip,
   });
   res.json(result);
 }
