@@ -268,3 +268,313 @@ export async function handleConfirmPinFlowDataExchange(body: any): Promise<any> 
 
   return send("RESULT", resultScreenData({ success: false, status: "ERROR", message: "مسار غير معروف" }));
 }
+
+// ===========================================================================
+// Wallet Flow — دايناميك واحد شامل. كل شيء جوّاه: التحويلات، الطلبات، الرصيد،
+// كشف الحساب، بيانات الحساب، تغيير الـ PIN، والمساعدة. القوائم كلها والتنقل
+// بينها بيتم جوّه نفس جلسة الفلو (data_exchange) من غير أي رسالة واتساب
+// إضافية — الرسالة الوحيدة هي فتح الفلو، وبعدها رسالة إشعار المستلم بس.
+// flow_token = معرّف المستخدم طول الفلو (مفيش تركيب معقّد).
+// ===========================================================================
+import { setPin, PinError } from "../services/pin.service.js";
+import {
+  createTransferRequest, listIncomingRequests, acceptTransferRequest, TransferRequestError,
+} from "../services/transferRequest.service.js";
+import { normalizeWaPhone } from "../services/registration.service.js";
+import { notifyTransferReceived, notifyMoneyRequest } from "./whatsapp.service.js";
+
+export async function sendWalletFlow(to: string, userId: string): Promise<boolean> {
+  const flowId = process.env.WHATSAPP_WALLET_FLOW_ID;
+  if (!flowId) return false;
+  const { sendInteractiveMessage } = await import("./whatsapp.client.js");
+  const { flowMessagePayload } = await import("./whatsapp.templates.js");
+  const r = await sendInteractiveMessage(
+    flowMessagePayload(to, flowId, userId, "افتح محفظة WTS.", "💼 المحفظة")
+  );
+  return r.ok;
+}
+
+function money(n: number | null | undefined): string {
+  return `${(n ?? 0).toLocaleString("en-US")} جنيه`;
+}
+
+// POST /api/whatsapp/flows/wallet
+export async function handleWalletFlowDataExchange(body: any): Promise<any> {
+  if (body?.action === "ping") return { status: "active", data: {} };
+  const parsed = decryptFlowBody(body);
+  if (!parsed) return { status: "failed", data: { message: "Flow endpoint not configured" } };
+  const { flowData, aesKey, iv } = parsed;
+  if (flowData?.action === "ping") return { status: "active", data: {} };
+
+  const version = flowData?.version ?? "7.2";
+  const screen = String(flowData?.screen ?? "INIT");
+  const data = flowData?.data ?? {};
+  const userId = String(flowData?.flow_token ?? "");
+  const send = (screenName: string, screenData: Record<string, unknown>) => encryptFlowResponse(aesKey, iv, version, screenName, screenData);
+
+  if (!userId) return send("RESULT", { title: "❌ خطأ", message: "تعذر التحقق من هوية المستخدم." });
+
+  try {
+    // ---- المدخل الأول: نجيب الرصيد ونفتح الشاشة الرئيسية ----
+    if (screen === "INIT" || flowData?.action === "INIT") {
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
+      return send("HOME", { balance_label: money(user?.demoBalance) });
+    }
+
+    const op = String(data.op ?? "");
+
+    // ---- الشاشة الرئيسية ----
+    if (screen === "HOME" && op === "home_open") {
+      const choice = String(data.choice ?? "");
+      if (choice === "transfers") return send("TRANSFERS_MENU", {});
+      if (choice === "account") return send("ACCOUNT_MENU", {});
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
+      return send("HOME", { balance_label: money(user?.demoBalance) });
+    }
+
+    // رجوع للرئيسية من أي قائمة فرعية
+    if (op === "home") {
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
+      return send("HOME", { balance_label: money(user?.demoBalance) });
+    }
+    if (op === "transfers_menu") return send("TRANSFERS_MENU", {});
+    if (op === "account_menu") return send("ACCOUNT_MENU", {});
+
+    // ---- قائمة التحويلات ----
+    if (screen === "TRANSFERS_MENU" && op === "transfers_open") {
+      const choice = String(data.choice ?? "");
+      if (choice === "back") {
+        const user = await prisma.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
+        return send("HOME", { balance_label: money(user?.demoBalance) });
+      }
+      if (choice === "send") return send("SEND_RECIPIENT", { error: "" });
+      if (choice === "request") return send("REQUESTS_HOME", await buildRequestsHomeData(userId));
+      if (choice === "balance") {
+        const u = await prisma.user.findUnique({ where: { id: userId }, select: { wtsId: true, demoBalance: true } });
+        return send("BALANCE", { wts_id: u?.wtsId ?? "-", balance_label: money(u?.demoBalance) });
+      }
+      if (choice === "statement") {
+        const lines = await buildStatementLines(userId);
+        return send("STATEMENT", { lines });
+      }
+      return send("TRANSFERS_MENU", {});
+    }
+
+    // ---- قائمة الحساب ----
+    if (screen === "ACCOUNT_MENU" && op === "account_open") {
+      const choice = String(data.choice ?? "");
+      if (choice === "back") {
+        const user = await prisma.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
+        return send("HOME", { balance_label: money(user?.demoBalance) });
+      }
+      if (choice === "info") return send("ACCOUNT_INFO", { info: await buildAccountInfo(userId) });
+      if (choice === "pin") return send("CHANGE_PIN", { message: "أدخل الرمز الجديد (6 أرقام)" });
+      if (choice === "help") return send("HELP", {});
+      return send("ACCOUNT_MENU", {});
+    }
+
+    // ---- تغيير الـ PIN ----
+    if (screen === "CHANGE_PIN" && op === "change_pin") {
+      const pin = String(data.pin ?? "").trim();
+      try {
+        validatePinFormat(pin);
+        await setPin(prisma, { userId, pin });
+        return send("RESULT", { title: "✅ تم", message: "اتغيّر الرمز السري بنجاح." });
+      } catch (err: any) {
+        return send("CHANGE_PIN", { message: err.message ?? "رمز غير صالح، جرب تاني." });
+      }
+    }
+
+    // ---- تحويل أموال: الخطوة 1 - المستلم ----
+    if (screen === "SEND_RECIPIENT" && op === "send_recipient") {
+      const result = await executeWtsAction(userId, WTS_FLOW_ACTIONS.SEND_MONEY, { recipientPhone: data.recipient_phone });
+      if (!result.success) return send("SEND_RECIPIENT", { error: result.message });
+      return send("SEND_AMOUNT", {
+        recipient_phone: result.recipientPhone,
+        recipient_label: `${result.recipientName ?? ""} ${result.recipientWtsId ? `(${result.recipientWtsId})` : ""}`.trim(),
+        escrow_options: [
+          { id: "yes", title: "🛡️ نعم، فعّل الحماية", description: "تقدر تبلّغ لاحقًا لو حصل نصب" },
+          { id: "no", title: "لا، تحويل عادي", description: "" },
+        ],
+      });
+    }
+
+    // ---- تحويل أموال: الخطوة 2 - المبلغ والحماية ----
+    if (screen === "SEND_AMOUNT" && op === "send_review") {
+      const escrowEnabled = String(data.escrow ?? "no") === "yes";
+      const result = await executeWtsAction(userId, WTS_FLOW_ACTIONS.CREATE_TRANSFER, {
+        recipientPhone: data.recipient_phone,
+        amount: data.amount,
+        escrowEnabled,
+      });
+      if (!result.success) {
+        return send("SEND_AMOUNT", {
+          recipient_phone: data.recipient_phone,
+          recipient_label: data.recipient_label,
+          escrow_options: [
+            { id: "yes", title: "🛡️ نعم، فعّل الحماية", description: "" },
+            { id: "no", title: "لا، تحويل عادي", description: "" },
+          ],
+        });
+      }
+      const summary =
+        `المستلم: ${data.recipient_label}\n` +
+        `المبلغ: ${money(result.amount)}\n` +
+        `الرسوم: ${money(result.fee)}\n` +
+        `الإجمالي: ${money(result.total)}` +
+        (escrowEnabled ? `\n🛡️ الحماية من النصب: مفعّلة` : "");
+      return send("SEND_REVIEW", { authorization_id: result.authorizationId, summary });
+    }
+
+    // ---- تحويل أموال: الخطوة 3 - الانتقال لإدخال الـ PIN (نفس شاشة PIN العامة) ----
+    if (screen === "SEND_REVIEW" && op === "goto_pin") {
+      return send("PIN_ENTRY", {
+        kind: "transfer",
+        ref_id: String(data.ref_id ?? ""),
+        summary: "أدخل الرمز السري لتأكيد التحويل.",
+      });
+    }
+
+    // ---- طلب أموال: الشاشة الرئيسية (طلبات واردة + جديد + رجوع) ----
+    if (screen === "REQUESTS_HOME" && op === "requests_action") {
+      const choice = String(data.choice ?? "");
+      if (choice === "back") return send("TRANSFERS_MENU", {});
+      if (choice === "new") return send("REQUEST_RECIPIENT", {});
+      // اختار طلب معيّن من القايمة
+      const pending = await listIncomingRequests(prisma, userId);
+      const reqRow = pending.find((r: any) => r.id === choice);
+      if (!reqRow) return send("REQUESTS_HOME", await buildRequestsHomeData(userId));
+      return send("REQUEST_VIEW", {
+        request_id: reqRow.id,
+        summary: `${reqRow.requester?.username ?? "مستخدم"} طالب منك ${money(reqRow.amount)}.${reqRow.description ? `\nالسبب: ${reqRow.description}` : ""}`,
+      });
+    }
+    if (op === "requests_home") return send("REQUESTS_HOME", await buildRequestsHomeData(userId));
+
+    // ---- طلب أموال: الانتقال لإدخال PIN لقبول الطلب ----
+    if (screen === "REQUEST_VIEW" && op === "goto_pin") {
+      return send("PIN_ENTRY", {
+        kind: "request",
+        ref_id: String(data.ref_id ?? ""),
+        summary: "أدخل الرمز السري لتأكيد قبول الطلب وتحويل المبلغ.",
+      });
+    }
+
+    // ---- طلب أموال جديد: الخطوة 1 - من مين ----
+    if (screen === "REQUEST_RECIPIENT" && op === "request_recipient") {
+      const phone = String(data.payer_phone ?? "").replace(/[\s\-()]/g, "");
+      const payer = await prisma.user.findUnique({ where: { phone: normalizeWaPhone(phone.replace("+", "")) } });
+      if (!payer) return send("REQUEST_RECIPIENT", { error: "لا يوجد مستخدم WTS بهذا الرقم." });
+      if (payer.id === userId) return send("REQUEST_RECIPIENT", { error: "لا يمكنك الطلب من نفسك." });
+      return send("REQUEST_AMOUNT", { payer_phone: payer.phone, payer_label: payer.fullName ?? payer.username });
+    }
+
+    // ---- طلب أموال جديد: الخطوة 2 - المبلغ وإرسال الطلب ----
+    if (screen === "REQUEST_AMOUNT" && op === "request_send") {
+      const amount = Number(String(data.amount ?? "").replace(/[^0-9]/g, ""));
+      if (!Number.isInteger(amount) || amount <= 0) {
+        return send("REQUEST_AMOUNT", { payer_phone: data.payer_phone, payer_label: data.payer_label });
+      }
+      try {
+        const requester = await prisma.user.findUnique({ where: { id: userId } });
+        const { request, payer } = await createTransferRequest(prisma, {
+          requesterId: userId,
+          payerPhone: String(data.payer_phone),
+          amount,
+          description: data.description ? String(data.description) : undefined,
+        });
+        await notifyMoneyRequest(
+          payer.whatsappPhone ?? payer.phone,
+          requester?.fullName ?? requester?.username ?? "مستخدم WTS",
+          request.amount,
+          request.id
+        ).catch(() => {});
+        return send("REQUEST_RESULT", { message: `تم إرسال طلب بمبلغ ${money(amount)} إلى ${data.payer_label}.` });
+      } catch (err: any) {
+        return send("REQUEST_RESULT", { message: `تعذر إرسال الطلب: ${err.message ?? "خطأ غير معروف"}` });
+      }
+    }
+
+    // ---- شاشة الـ PIN الموحّدة: تنفيذ فعلي بعد تحقق السيرفر ----
+    if (screen === "PIN_ENTRY" && op === "execute") {
+      const kind = String(data.kind ?? "");
+      const refId = String(data.ref_id ?? "");
+      const pin = String(data.pin ?? "").trim();
+      if (!/^\d{6}$/.test(pin)) {
+        return send("PIN_ENTRY", { kind, ref_id: refId, summary: "أدخل رمز مكوّن من 6 أرقام." });
+      }
+      if (kind === "transfer") {
+        // executeWtsAction's CONFIRM_TRANSFER بالفعل بتبعت إشعار المستلم
+        // وتقيّم أهلية الإحالة جوّاها — من غير تكرار هنا.
+        const result = await executeWtsAction(userId, WTS_FLOW_ACTIONS.CONFIRM_TRANSFER, { authorizationId: refId, pin });
+        return send("RESULT", resultScreenData(result));
+      }
+      if (kind === "request") {
+        try {
+          const { transaction } = await acceptTransferRequest(prisma, { requestId: refId, payerId: userId, pin });
+          await notifyTransferReceived(transaction.id).catch(() => {});
+          return send("RESULT", {
+            title: "✅ تمت العملية بنجاح",
+            message: `تم تحويل ${money(transaction.amount)}.`,
+          });
+        } catch (err: any) {
+          if (err instanceof PinError) {
+            return send("PIN_ENTRY", { kind, ref_id: refId, summary: err.message });
+          }
+          const msg = err instanceof TransferRequestError ? err.message : "تعذر تنفيذ العملية.";
+          return send("RESULT", { title: "❌ لم يتم تنفيذ العملية", message: msg });
+        }
+      }
+      return send("RESULT", { title: "❌ خطأ", message: "نوع عملية غير معروف." });
+    }
+
+    // مسار غير متوقع — نرجّع المستخدم لأمان الشاشة الرئيسية بدل ما نعلّق الفلو
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
+    return send("HOME", { balance_label: money(user?.demoBalance) });
+  } catch (err) {
+    logger.error("Wallet flow data-exchange error", err);
+    return send("RESULT", { title: "❌ خطأ", message: "حصل خطأ غير متوقع، جرب تاني من *menu*." });
+  }
+}
+
+async function buildRequestsHomeData(userId: string) {
+  const pending = await listIncomingRequests(prisma, userId);
+  const options = pending.slice(0, 8).map((r: any) => ({
+    id: r.id,
+    title: `${r.amount.toLocaleString("en-US")} جنيه`,
+    description: `من ${r.requester?.username ?? "مستخدم WTS"}`,
+  }));
+  options.push({ id: "new", title: "➕ طلب أموال جديد", description: "" });
+  options.push({ id: "back", title: "🔙 رجوع للتحويلات", description: "" });
+  return { pending_options: options };
+}
+
+async function buildStatementLines(userId: string): Promise<string> {
+  const txs = await prisma.transaction.findMany({
+    where: { OR: [{ senderId: userId }, { receiverId: userId }] },
+    orderBy: { createdAt: "desc" },
+    take: 15,
+    include: { sender: { select: { phone: true } }, receiver: { select: { phone: true } } },
+  });
+  if (txs.length === 0) return "لا يوجد عمليات بعد.";
+  return txs
+    .map((t: any) => {
+      const dir = t.senderId === userId ? "إرسال" : "استلام";
+      const other = t.senderId === userId ? t.receiver?.phone ?? "؟" : t.sender?.phone ?? "؟";
+      return `• ${money(t.amount)} ${dir} (${other}) — ${t.reference}`;
+    })
+    .join("\n");
+}
+
+async function buildAccountInfo(userId: string): Promise<string> {
+  const u = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { username: true, phone: true, fullName: true, wtsId: true, walletId: true, status: true, verificationStatus: true, createdAt: true },
+  });
+  if (!u) return "الحساب غير موجود.";
+  return (
+    `الاسم: ${u.fullName ?? "-"}\nWTS ID: ${u.wtsId ?? "-"}\nالمحفظة: ${u.walletId ?? "-"}\n` +
+    `الرقم: ${u.phone}\nالحالة: ${u.status}\nالتوثيق: ${u.verificationStatus}\n` +
+    `عضو منذ: ${u.createdAt.toLocaleDateString("ar-EG")}`
+  );
+}

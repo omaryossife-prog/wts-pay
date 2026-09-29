@@ -9,7 +9,7 @@ import { prisma } from "../utils/prisma.js";
 import { logger } from "../utils/logger.js";
 import { sendTextMessage, sendButtonMessage, sendListMessage, markAsRead } from "./whatsapp.client.js";
 import { ACTIONS, MAIN_MENU_ROWS, GREETING_TEXT, START_BUTTON, NUMBER_NO_TEXT } from "./whatsapp.templates.js";
-import { sendPinFlow, sendSendMoneyFlow, sendConfirmPinFlow } from "./whatsapp.flows.js";
+import { sendPinFlow, sendSendMoneyFlow, sendConfirmPinFlow, sendWalletFlow } from "./whatsapp.flows.js";
 import {
   SessionState, getUserByWaIdentity, getSession, setSession,
   maintenanceActive,
@@ -35,7 +35,12 @@ export interface IncomingMessage {
   listId?: string;
 }
 
-async function sendMainMenu(to: string, firstName?: string) {
+async function sendMainMenu(to: string, userId: string, firstName?: string) {
+  // الفلو الموحّد بقى نقطة الدخول الأساسية — رسالة واحدة تفتح كل المحفظة.
+  // لو الفلو مش متظبط لسه (WHATSAPP_WALLET_FLOW_ID)، نرجع للقائمة القديمة
+  // كـ fallback موثّق، مش نظام تاني.
+  const sent = await sendWalletFlow(to, userId);
+  if (sent) return;
   await sendListMessage(
     to,
     firstName ? `Welcome back, ${firstName} 👋` : "WTS Pay main menu",
@@ -103,7 +108,7 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
   if (lower === "menu") {
     if (user.verificationStatus === "VERIFIED") {
       await setSession(user.id, SessionState.IDLE, {});
-      await sendMainMenu(to, user.fullName?.split(" ")[0]);
+      await sendMainMenu(to, user.id, user.fullName?.split(" ")[0]);
     } else if (user.verificationStatus === "PENDING_REVIEW") {
       await sendTextMessage(to, "Your registration is under review. Please wait for approval.");
     }
@@ -340,9 +345,9 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
     default: {
       if (text && !replyId) {
         // IDLE + free text -> show menu
-        await sendMainMenu(to, user.fullName?.split(" ")[0]);
+        await sendMainMenu(to, user.id, user.fullName?.split(" ")[0]);
       } else {
-        await sendMainMenu(to, user.fullName?.split(" ")[0]);
+        await sendMainMenu(to, user.id, user.fullName?.split(" ")[0]);
       }
     }
   }
