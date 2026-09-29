@@ -323,6 +323,15 @@ export async function handleWalletFlowDataExchange(body: any): Promise<any> {
 
     const op = String(data.op ?? "");
 
+    // ---- رجوع عام لأي شاشة قائمة (البيانات المطلوبة بتتجدد من السيرفر) ----
+    if (op === "go_back") {
+      const target = String(data.target ?? "HOME");
+      if (target === "TRANSFERS_MENU") return send("TRANSFERS_MENU", {});
+      if (target === "ACCOUNT_MENU") return send("ACCOUNT_MENU", {});
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
+      return send("HOME", { balance_label: money(user?.demoBalance) });
+    }
+
     // ---- الشاشة الرئيسية ----
     if (screen === "HOME" && op === "home_open") {
       const choice = String(data.choice ?? "");
@@ -331,14 +340,6 @@ export async function handleWalletFlowDataExchange(body: any): Promise<any> {
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
       return send("HOME", { balance_label: money(user?.demoBalance) });
     }
-
-    // رجوع للرئيسية من أي قائمة فرعية
-    if (op === "home") {
-      const user = await prisma.user.findUnique({ where: { id: userId }, select: { demoBalance: true } });
-      return send("HOME", { balance_label: money(user?.demoBalance) });
-    }
-    if (op === "transfers_menu") return send("TRANSFERS_MENU", {});
-    if (op === "account_menu") return send("ACCOUNT_MENU", {});
 
     // ---- قائمة التحويلات ----
     if (screen === "TRANSFERS_MENU" && op === "transfers_open") {
@@ -368,6 +369,7 @@ export async function handleWalletFlowDataExchange(body: any): Promise<any> {
         return send("HOME", { balance_label: money(user?.demoBalance) });
       }
       if (choice === "info") return send("ACCOUNT_INFO", { info: await buildAccountInfo(userId) });
+      if (choice === "referrals") return send("REFERRALS", { info: await buildReferralsInfo(userId) });
       if (choice === "pin") return send("CHANGE_PIN", { message: "أدخل الرمز الجديد (6 أرقام)" });
       if (choice === "help") return send("HELP", {});
       return send("ACCOUNT_MENU", {});
@@ -564,6 +566,17 @@ async function buildStatementLines(userId: string): Promise<string> {
       return `• ${money(t.amount)} ${dir} (${other}) — ${t.reference}`;
     })
     .join("\n");
+}
+
+async function buildReferralsInfo(userId: string): Promise<string> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { referralCode: true, referralCount: true } });
+  if (!user) return "الحساب غير موجود.";
+  const rewarded = await prisma.referral.count({ where: { referrerId: userId, status: "REWARDED" } });
+  return (
+    `كود الإحالة بتاعك: ${user.referralCode}\n` +
+    `شاركه مع أصحابك! بعد ما يسجّلوا ويتوثّقوا ويعملوا أول تحويل، هتاخد مكافأة الإحالة.\n\n` +
+    `عدد المدعوّين: ${user.referralCount} • اتكافئ منهم: ${rewarded}`
+  );
 }
 
 async function buildAccountInfo(userId: string): Promise<string> {
