@@ -317,3 +317,24 @@ regulator (e.g. Central Bank of Egypt for wallets operating in Egypt).
 #### WhatsApp Flow actions result screen
 
 `server/flows/wts-actions.flow.json` contains the native WhatsApp Flow for WTS actions. Configure `WHATSAPP_WTS_ACTIONS_FLOW_ID` and point the Flow data exchange endpoint to `POST /api/whatsapp/flows/actions`. The Flow shows a backend-driven `RESULT` screen and also sends a normal WhatsApp message after terminal operations; the existing chat send-money flow remains as fallback when the Flow id is not configured.
+
+## 13. Phone verification by SMS (SMSGate)
+
+تسجيل أي محفظة جديدة من الموقع مستحيل بدون إثبات ملكية رقم الهاتف برسالة SMS:
+
+1. المستخدم يدخل رقمه بالصيغة الدولية (`+2010xxxxxxxx`) → "إرسال كود التحقق" → `POST /api/auth/phone/send`
+2. السيرفر يولّد كود 6 أرقام ويبعته SMS عن طريق موبايل الأندرويد (SMSGate Cloud).
+3. المستخدم يدخل الكود → `POST /api/auth/phone/verify` → يرجع `phoneToken` صالح 15 دقيقة.
+4. `POST /api/auth/register` يرفض أي طلب بدون `phoneToken` مطابق للرقم (403 `PHONE_NOT_VERIFIED`).
+
+الحمايات: الكود متخزّن كـ HMAC-SHA256 فقط · صلاحية 5 دقائق · 5 محاولات · 45 ثانية بين الإرسالين ·
+5 رسائل/يوم لكل رقم · 10 رسائل/يوم لكل IP · الرقم المسجّل لا يُرسل له SMS · التخزين في جدول `Config` (لا migration).
+
+إعداد SMSGate: في التطبيق → الرئيسية → فعّل **Cloud Server** → اضغط **Online** → هتظهر Username/Password. ثم:
+
+```
+npx wrangler secret put SMSGATE_USERNAME
+npx wrangler secret put SMSGATE_PASSWORD
+# اختياري لو بتستخدم سيرفر خاص:
+# SMSGATE_URL=https://<your-server>/3rdparty/v1/messages
+```
