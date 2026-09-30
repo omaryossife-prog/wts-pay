@@ -21,4 +21,13 @@ export const config = {
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "wts-verify-token",
     apiVersion: process.env.WHATSAPP_API_VERSION ?? "v21.0",
   },
+  // SMSGate (sms-gate.app) — موبايل أندرويد كبوابة SMS.
+  // Cloud: https://api.sms-gate.app/3rdparty/v1
+  // Self-hosted: https://YOUR-SERVER/3rdparty/v1
+  smsGate: {
+    url: process.env.SMSGATE_URL ?? "https://api.sms-gate.app/3rdparty/v1",
+    username: process.env.SMSGATE_USERNAME ?? "",
+    password: process.env.SMSGATE_PASSWORD ?? "",
+    enabled: Boolean(process.env.SMSGATE_USERNAME && process.env.SMSGATE_PASSWORD),
+  },
 };

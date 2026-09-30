@@ -5,6 +5,8 @@ import { PinError } from "../services/pin.service.js";
 import { AuthorizationError } from "../services/txauth.service.js";
 import { TransferRequestError } from "../services/transferRequest.service.js";
 import { FraudReportError } from "../services/fraudReport.service.js";
+import { OtpError } from "../services/otp.service.js";
+import { SmsError } from "../services/sms.service.js";
 import { logger } from "../utils/logger.js";
 
 export class HttpError extends Error {
@@ -95,6 +97,16 @@ export function errorHandler(
 
   if (err instanceof HttpError) {
     return res.status(err.status).json({ error: err.message });
+  }
+
+  if (err instanceof OtpError) {
+    const body: Record<string, unknown> = { error: err.message, code: err.code };
+    if (err.retryAfterSeconds) body.retryAfterSeconds = err.retryAfterSeconds;
+    return res.status(err.status).json(body);
+  }
+
+  if (err instanceof SmsError) {
+    return res.status(502).json({ error: err.message, code: err.code });
   }
 
   logger.error("Unhandled error", err);

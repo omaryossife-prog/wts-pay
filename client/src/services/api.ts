@@ -56,6 +56,19 @@ function uuid(): string {
 }
 
 export const api = {
+  // phone verification (SMS OTP)
+  requestOtp: (phone: string) =>
+    request<{ ok: boolean; cooldownSeconds: number }>("/api/auth/otp/request", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    }),
+
+  verifyOtp: (phone: string, code: string) =>
+    request<{ phoneToken: string }>("/api/auth/otp/verify", {
+      method: "POST",
+      body: JSON.stringify({ phone, code }),
+    }),
+
   // auth
   register: (
     data: {
@@ -63,6 +76,7 @@ export const api = {
       username: string;
       password: string;
       referralCode?: string;
+      phoneToken: string;
     }
   ) =>
     request<{

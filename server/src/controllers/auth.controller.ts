@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../utils/prisma.js";
 import { register, login } from "../services/user.service.js";
+import { assertPhoneVerified } from "../services/otp.service.js";
 import { signToken } from "../utils/jwt.js";
 
 export const registerSchema = z.object({
@@ -9,6 +10,8 @@ export const registerSchema = z.object({
   username: z.string().min(2).max(50),
   password: z.string().min(8).max(100),
   referralCode: z.string().optional(),
+  // توكن تحقق الهاتف من /api/auth/otp/verify — إجباري
+  phoneToken: z.string().min(10),
 });
 
 export const loginSchema = z.object({
@@ -17,7 +20,9 @@ export const loginSchema = z.object({
 });
 
 export async function registerController(req: Request, res: Response) {
-  const user = await register(prisma, req.body);
+  // ممنوع تسجيل أي محفظة جديدة قبل إثبات ملكية رقم الهاتف برسالة SMS
+  const verifiedPhone = assertPhoneVerified(req.body.phoneToken, req.body.phone);
+  const user = await register(prisma, { ...req.body, phone: verifiedPhone });
   // لا نسجّل دخول المستخدم تلقائيًا بعد التسجيل — الحساب لازم يتراجع
   // ويتوافق عليه من الأدمن أول (verificationStatus: PENDING_REVIEW).
   res.status(201).json({
