@@ -13,6 +13,7 @@ export interface User {
   verificationStatus?: string;
   transfersEnabled?: boolean;
   pinSet?: boolean;
+  language?: "ar" | "en";
 }
 
 export interface Transaction {

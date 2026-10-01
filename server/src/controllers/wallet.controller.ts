@@ -8,10 +8,15 @@ import { evaluateReferralEligibility } from "../services/referral.service.js";
 import { computeFee } from "../services/fee.service.js";
 import { maskPhone } from "../utils/phone-mask.js";
 import { setPin, PinError } from "../services/pin.service.js";
+import { normalizeLang } from "../i18n/lang.js";
 
 export const setPinSchema = z.object({
   password: z.string().min(1),
   pin: z.string().length(6),
+});
+
+export const setLanguageSchema = z.object({
+  language: z.enum(["ar", "en"]),
 });
 
 export const transferSchema = z.object({
@@ -33,7 +38,7 @@ export async function getWalletController(req: Request, res: Response) {
       id: true, phone: true, username: true, demoBalance: true,
       referralCode: true, referralCount: true, status: true, createdAt: true,
       wtsId: true, walletId: true, fullName: true, verificationStatus: true,
-      transfersEnabled: true, pinHash: true,
+      transfersEnabled: true, pinHash: true, language: true,
     },
   });
   const { pinHash, ...safeUser } = user ?? {};
@@ -43,14 +48,25 @@ export async function getWalletController(req: Request, res: Response) {
   });
 }
 
+// Website language switcher — same User.language column the WhatsApp bot reads.
+export async function setLanguageController(req: Request, res: Response) {
+  const user = await prisma.user.update({
+    where: { id: req.user!.userId },
+    data: { language: req.body.language },
+    select: { language: true },
+  });
+  res.json({ language: normalizeLang(user.language) });
+}
+
 export async function setPinController(req: Request, res: Response) {
   const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (!user) throw new PinError("PIN_NOT_SET", "Account not found.");
+  const lang = normalizeLang(user.language);
   const ok = await bcrypt.compare(req.body.password, user.passwordHash);
   if (!ok) {
     return res.status(401).json({ error: "Incorrect password.", code: "INVALID_PASSWORD" });
   }
-  await setPin(prisma, { userId: req.user!.userId, pin: req.body.pin, ip: req.ip });
+  await setPin(prisma, { userId: req.user!.userId, pin: req.body.pin, ip: req.ip, lang });
   res.json({ ok: true });
 }
 

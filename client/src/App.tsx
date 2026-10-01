@@ -12,17 +12,23 @@ import Referrals from "./pages/Referrals";
 import Profile from "./pages/Profile";
 import Help from "./pages/Help";
 import Admin from "./pages/Admin";
+import LanguagePicker from "./components/LanguagePicker";
+import { useLang } from "./i18n/LanguageContext";
 
 function Protected({ children, adminOnly = false }: { children: JSX.Element; adminOnly?: boolean }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="shell"><p style={{ padding: 40, textAlign: "center" }}>Loading…</p></div>;
+  const { t } = useLang();
+  if (loading) return <div className="shell"><p style={{ padding: 40, textAlign: "center" }}>{t.common.loading}</p></div>;
   if (!user) return <Navigate to="/login" replace />;
   if (adminOnly && user.role !== "ADMIN") return <Navigate to="/wallet" replace />;
   return children;
 }
 
 export default function App() {
+  const { needsPicker } = useLang();
   return (
+    <>
+    {needsPicker && <LanguagePicker />}
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
@@ -41,5 +47,6 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }

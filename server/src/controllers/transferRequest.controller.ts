@@ -11,6 +11,7 @@ import {
 } from "../services/transferRequest.service.js";
 import { maskPhone } from "../utils/phone-mask.js";
 import { notifyMoneyRequest, notifyTransferReceived, notifyRequestRejected } from "../whatsapp/whatsapp.service.js";
+import { normalizeLang } from "../i18n/lang.js";
 
 export const createRequestSchema = z.object({
   payerPhone: z.string().min(8).max(20),
@@ -31,7 +32,7 @@ export async function createRequestController(req: Request, res: Response) {
   });
   const requester = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   if (payer.whatsappPhone || payer.phone) {
-    await notifyMoneyRequest(payer.whatsappPhone ?? payer.phone, requester?.username ?? "A WTS user", request.amount, request.id).catch(() => {});
+    await notifyMoneyRequest(payer.whatsappPhone ?? payer.phone, requester?.username ?? "A WTS user", request.amount, request.id, normalizeLang((payer as any).language)).catch(() => {});
   }
   res.status(201).json({ request });
 }
@@ -58,7 +59,7 @@ export async function rejectRequestController(req: Request, res: Response) {
   });
   const requester = await prisma.user.findUnique({ where: { id: updated.requesterId } });
   if (requester) {
-    await notifyRequestRejected(requester.whatsappPhone ?? requester.phone, updated.amount).catch(() => {});
+    await notifyRequestRejected(requester.whatsappPhone ?? requester.phone, updated.amount, normalizeLang((requester as any).language)).catch(() => {});
   }
   res.json({ request: updated });
 }

@@ -1,42 +1,34 @@
 import { Link } from "react-router-dom";
+import { useLang } from "../i18n/LanguageContext";
 
 export default function Landing() {
+  const { t } = useLang();
   return (
     <div className="shell" style={{ paddingBottom: 40 }}>
       <div className="hero">
         <div className="logo">WTS <span>Pay</span></div>
-        <p>A demo digital wallet — send demo credits to friends, earn referral rewards.</p>
+        <p>{t.landing.tagline}</p>
       </div>
 
       <div className="card">
-        <h2>💼 Demo Wallet</h2>
-        <p className="muted">
-          Every account gets an internal demo balance. Transfers between WTS users are instant,
-          with a transparent fee of 1 EGP per started 1,000 EGP.
-        </p>
+        <h2>{t.landing.walletTitle}</h2>
+        <p className="muted">{t.landing.walletBody}</p>
       </div>
       <div className="card">
-        <h2>🎁 Referral Rewards</h2>
-        <p className="muted">
-          Invite friends with your personal code. Rewards are paid only after anti-abuse checks —
-          when your invitee completes their first transfer.
-        </p>
+        <h2>{t.landing.referralTitle}</h2>
+        <p className="muted">{t.landing.referralBody}</p>
       </div>
       <div className="card">
-        <h2>💬 WhatsApp-ready</h2>
-        <p className="muted">
-          The same wallet engine will be reachable through the official WhatsApp Cloud API —
-          balance checks, transfers and referrals by chat.
-        </p>
+        <h2>{t.landing.whatsappTitle}</h2>
+        <p className="muted">{t.landing.whatsappBody}</p>
       </div>
 
       <div className="demo-banner" style={{ marginTop: 16 }}>
-        <strong>Demo Balance — No Cash Value.</strong> Demo credits cannot be withdrawn,
-        exchanged, or transferred outside WTS. No bank, InstaPay, or Fawry integration.
+        {t.landing.demoBanner}
       </div>
 
-      <Link to="/register" className="btn" style={{ marginBottom: 10 }}>Create free demo account</Link>
-      <Link to="/login" className="btn ghost">I have an account</Link>
+      <Link to="/register" className="btn" style={{ marginBottom: 10 }}>{t.landing.createAccount}</Link>
+      <Link to="/login" className="btn ghost">{t.landing.haveAccount}</Link>
     </div>
   );
 }

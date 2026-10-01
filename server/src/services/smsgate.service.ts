@@ -42,8 +42,10 @@ export const sendSms: SmsSender = async (phone, text) => {
       body: JSON.stringify({
         textMessage: { text },
         phoneNumbers: [phone],
-        // لو الموبايل أوفلاين أكتر من 5 دقايق الكود خلاص انتهى — مالوش لازمة يتبعت متأخر
-        ttl: 300,
+        // مش ttl للكود نفسه (ده منفصل، 5 دقايق زي ما هو) — ده مهلة سيرفر SMSGate
+        // لحد ما الموبايل يونلاين ويبعتها فعليًا. بنديله هامش أكبر عشان تأخير
+        // الخلفية (Doze/Battery optimization) على أندرويد.
+        ttl: 600,
       }),
     });
   } catch (err) {

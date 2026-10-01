@@ -6,7 +6,7 @@ interface AuthCtx {
   user: User | null;
   loading: boolean;
   login: (phone: string, password: string) => Promise<void>;
-  register: (data: { phone: string; username: string; password: string; referralCode?: string; phoneToken: string }) => Promise<{ pendingReview?: boolean; message?: string }>;
+  register: (data: { phone: string; username: string; password: string; referralCode?: string; phoneToken: string; language?: "ar" | "en" }) => Promise<{ pendingReview?: boolean; message?: string }>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(r.user);
   };
 
-  const register = async (data: { phone: string; username: string; password: string; referralCode?: string; phoneToken: string }) => {
+  const register = async (data: { phone: string; username: string; password: string; referralCode?: string; phoneToken: string; language?: "ar" | "en" }) => {
     // لا تسجّل دخول تلقائي: الحساب الجديد بيروح "قيد المراجعة" لحد ما الأدمن يوافق عليه.
     const r = await api.register(data);
     return { pendingReview: r.pendingReview, message: r.message };

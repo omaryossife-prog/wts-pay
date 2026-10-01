@@ -5,6 +5,7 @@ import {
   fileFraudReport, listFraudReportsForAdmin, resolveFraudReport, setReportVisibility,
 } from "../services/fraudReport.service.js";
 import { notifyReportFiled, notifyReportResolved } from "../whatsapp/whatsapp.service.js";
+import { normalizeLang } from "../i18n/lang.js";
 
 export const resolveReportSchema = z.object({
   decision: z.enum(["CONFIRMED", "DISMISSED"]),
@@ -21,7 +22,7 @@ export async function fileReportController(req: Request, res: Response) {
     reporterId: req.user!.userId,
     transactionId: req.params.id,
   });
-  await notifyReportFiled(reportedUser.whatsappPhone ?? reportedUser.phone).catch(() => {});
+  await notifyReportFiled(reportedUser.whatsappPhone ?? reportedUser.phone, normalizeLang((reportedUser as any).language)).catch(() => {});
   res.status(201).json({ report });
 }
 
@@ -44,7 +45,8 @@ export async function adminResolveReportController(req: Request, res: Response) 
     reportedUser.whatsappPhone ?? reportedUser.phone,
     report.status,
     reportedUser.banned,
-    reportedUser.frozenUntil
+    reportedUser.frozenUntil,
+    normalizeLang((reportedUser as any).language)
   ).catch(() => {});
   res.json({ report, reportedUser });
 }

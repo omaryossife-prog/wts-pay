@@ -1,18 +1,21 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
-
-const links = [
-  { to: "/wallet", icon: "💼", label: "Wallet" },
-  { to: "/send", icon: "💸", label: "Send" },
-  { to: "/requests", icon: "🙏", label: "Requests" },
-  { to: "/transactions", icon: "📜", label: "Activity" },
-  { to: "/referrals", icon: "🎁", label: "Referrals" },
-  { to: "/profile", icon: "👤", label: "Profile" },
-];
+import { useLang } from "../i18n/LanguageContext";
 
 export default function Layout({ admin = false }: { admin?: boolean }) {
   const { user, logout } = useAuth();
+  const { t } = useLang();
   const nav = useNavigate();
+
+  const links = [
+    { to: "/wallet", icon: "💼", label: t.nav.wallet },
+    { to: "/send", icon: "💸", label: t.nav.send },
+    { to: "/requests", icon: "🙏", label: t.nav.requests },
+    { to: "/transactions", icon: "📜", label: t.nav.activity },
+    { to: "/referrals", icon: "🎁", label: t.nav.referrals },
+    { to: "/profile", icon: "👤", label: t.nav.profile },
+  ];
+
   return (
     <>
       <nav className="navbar">
@@ -24,7 +27,7 @@ export default function Layout({ admin = false }: { admin?: boolean }) {
         ))}
         {user?.role === "ADMIN" && (
           <NavLink to="/admin" className={({ isActive }) => (isActive ? "active" : "")}>
-            <span className="icon">🛡️</span>Admin
+            <span className="icon">🛡️</span>{t.nav.admin}
           </NavLink>
         )}
       </nav>
@@ -38,14 +41,13 @@ export default function Layout({ admin = false }: { admin?: boolean }) {
             className="btn ghost small"
             onClick={() => { logout(); nav("/"); }}
           >
-            Log out
+            {t.nav.logout}
           </button>
         </div>
         {admin ? <Outlet /> : (
           <>
             <div className="demo-banner">
-              <strong>Demo environment</strong> — balances are demo credits with no cash value.
-              No real money, no withdrawals.
+              <strong>{t.common.demoBannerTitle}</strong> — {t.common.demoBanner}
             </div>
             <Outlet />
           </>

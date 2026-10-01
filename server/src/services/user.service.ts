@@ -16,6 +16,7 @@ export interface RegisterInput {
   username: string;
   password: string;
   referralCode?: string | null;
+  language?: "ar" | "en";
 }
 
 export async function register(db: Db, input: RegisterInput) {
@@ -51,6 +52,7 @@ export async function register(db: Db, input: RegisterInput) {
         verificationStatus: "PENDING_REVIEW",
         transfersEnabled: false,
         fullName: input.username.trim(),
+        language: input.language === "en" ? "en" : "ar",
       },
     });
   });

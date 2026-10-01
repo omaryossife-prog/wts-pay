@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { api } from "../services/api";
+import { useLang } from "../i18n/LanguageContext";
 
 export default function Register() {
   const { register } = useAuth();
+  const { lang } = useLang();
   const [params] = useSearchParams();
   const [form, setForm] = useState({
     phone: "",
@@ -73,7 +75,7 @@ export default function Register() {
     setError("");
     setBusy(true);
     try {
-      await register({ ...form, phone: form.phone.trim(), referralCode: form.referralCode || undefined, phoneToken });
+      await register({ ...form, phone: form.phone.trim(), referralCode: form.referralCode || undefined, phoneToken, language: lang });
       setPendingReview(true);
     } catch (err: any) {
       setError(err.message);

@@ -10,6 +10,8 @@ export const registerSchema = z.object({
   username: z.string().min(2).max(50),
   password: z.string().min(8).max(100),
   referralCode: z.string().optional(),
+  // لغة الواجهة اللي المستخدم مستخدمها وقت التسجيل (اختارها من مُبدِّل اللغة في الموقع).
+  language: z.enum(["ar", "en"]).optional(),
   // إثبات ملكية الرقم (صادر من /auth/phone/verify) — التسجيل مستحيل من غيره
   phoneToken: z.string({ required_error: "لازم تتحقق من رقم الموبايل برسالة SMS قبل التسجيل." }).min(10),
 });

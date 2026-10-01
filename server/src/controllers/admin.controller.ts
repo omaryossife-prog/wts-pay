@@ -9,6 +9,7 @@ import { pendingVerifications, approveRegistration, rejectRegistration } from ".
 import { adminResetPin } from "../services/pin.service.js";
 import { listReportsForUser } from "../services/fraudReport.service.js";
 import { notifyFreeze, notifyApproval, notifyRejection } from "../whatsapp/whatsapp.service.js";
+import { normalizeLang } from "../i18n/lang.js";
 
 export const adjustSchema = z.object({
   userId: z.string().uuid(),
@@ -93,7 +94,7 @@ export async function approveController(req: Request, res: Response) {
     ip: req.ip,
   });
   if (updated.whatsappPhone) {
-    await notifyApproval(updated.whatsappPhone, updated.wtsId!, updated.walletId!, updated.demoBalance).catch(() => {});
+    await notifyApproval(updated.whatsappPhone, updated.wtsId!, updated.walletId!, updated.demoBalance, normalizeLang((updated as any).language)).catch(() => {});
   }
   res.json({ id: updated.id, wtsId: updated.wtsId, walletId: updated.walletId, status: updated.verificationStatus, balance: updated.demoBalance });
 }
@@ -106,7 +107,7 @@ export async function rejectController(req: Request, res: Response) {
     ip: req.ip,
   });
   if (updated.whatsappPhone) {
-    await notifyRejection(updated.whatsappPhone, req.body.reason).catch(() => {});
+    await notifyRejection(updated.whatsappPhone, req.body.reason, normalizeLang((updated as any).language)).catch(() => {});
   }
   res.json({ id: updated.id, status: updated.verificationStatus });
 }
@@ -170,7 +171,7 @@ export async function freezeController(req: Request, res: Response) {
     frozen: true,
     ip: req.ip,
     notify: async (user, frozen) => {
-      if (user.whatsappPhone) await notifyFreeze(user.whatsappPhone, frozen);
+      if (user.whatsappPhone) await notifyFreeze(user.whatsappPhone, frozen, normalizeLang((user as any).language));
     },
   });
   res.json(result);
@@ -183,7 +184,7 @@ export async function unfreezeController(req: Request, res: Response) {
     frozen: false,
     ip: req.ip,
     notify: async (user, frozen) => {
-      if (user.whatsappPhone) await notifyFreeze(user.whatsappPhone, frozen);
+      if (user.whatsappPhone) await notifyFreeze(user.whatsappPhone, frozen, normalizeLang((user as any).language));
     },
   });
   res.json(result);

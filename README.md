@@ -338,3 +338,53 @@ npx wrangler secret put SMSGATE_PASSWORD
 # اختياري لو بتستخدم سيرفر خاص:
 # SMSGATE_URL=https://<your-server>/3rdparty/v1/messages
 ```
+
+## 14. Bilingual support (Arabic / English) — website + WhatsApp
+
+Every user has a stored language preference (`User.language`, `"ar"` or `"en"`, default `"ar"`
+for all existing accounts). It drives both the website and the WhatsApp bot, and either side
+can change it at any time — the two stay in sync because they read/write the same column.
+
+### WhatsApp
+
+- A brand-new phone number is greeted with a language picker (🇪🇬 العربي / 🇬🇧 English) before
+  anything else — including before "Start". The choice is held against the WhatsApp identity
+  (`Config` table, key `wa_pending_lang:<waId>`, no migration needed for this part) until
+  registration starts, at which point it becomes `User.language`.
+- Any registered user can switch language at any time by typing **"language"** or **"لغة"**,
+  or by tapping **🌐 Language** in the main menu list (shown when the native wallet Flow isn't
+  configured). It updates `User.language` immediately — no restart needed.
+- The entire chat-based conversation (registration, PIN setup, balance/transactions/referrals/
+  account/help, send-money and money-request flows, every admin-triggered notification such as
+  approval/rejection/freeze/fraud-report messages) is translated via `server/src/i18n/lang.ts`'s
+  `tr(lang, ar, en)` helper, threaded through `whatsapp.service.ts`, `whatsapp.handler.ts`,
+  `whatsapp.templates.ts` and `whatsapp.actions.ts`.
+- The native wallet Flow's **dynamic** content (`whatsapp.flows.ts` — balances, summaries,
+  option lists, error messages sent to each Flow screen) is bilingual the same way.
+  **Known limitation:** the Flow's fixed screen *titles* and any caption hard-coded directly in
+  the registered Flow JSON (`server/flows/wts-wallet.flow.json`, `wts-actions.flow.json`) are
+  not changed by this — those stay as authored in Meta Business Manager. Making those fully
+  bilingual needs either a second Flow asset per language registered with Meta, or converting
+  every remaining static label into a `data`-bound field and re-testing live in Meta's Flow
+  Builder — left as a follow-up since it can't be safely done without live testing access.
+
+### Website
+
+- First-ever visit (no account, nothing saved yet) shows a full-screen language picker before
+  anything else, same idea as the WhatsApp greeting. The choice is saved to `localStorage` and
+  sent along at registration so the new account's `language` matches what was picked.
+- Once logged in, the account's saved `language` is authoritative and overrides whatever was
+  only stored locally — switching in **Profile → Interface language** calls
+  `POST /api/wallet/language` and updates `User.language` right away (same column the bot reads).
+- `client/src/i18n/translations.ts` holds the `ar`/`en` dictionary, applied via
+  `useLang()` (`client/src/i18n/LanguageContext.tsx`), which also flips `<html dir>` between
+  `rtl`/`ltr`. Translated so far: the landing page, login, the logged-in nav/shell (`Layout`),
+  and the Profile page including the language switcher. The remaining pages (Wallet, Send,
+  Requests, Transactions, Referrals, Help, Admin, and parts of Register) still render in their
+  original language and are a natural next step to extend using the same dictionary pattern.
+
+### Database
+
+`User.language` (`supabase/migrations/0003_user_language.sql`) — run migrations as usual
+(Section 4). Existing rows default to `"ar"`, matching "every user before this had Arabic
+by default" from the spec.

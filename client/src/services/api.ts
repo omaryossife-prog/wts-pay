@@ -64,6 +64,7 @@ export const api = {
       password: string;
       referralCode?: string;
       phoneToken: string;
+      language?: "ar" | "en";
     }
   ) =>
     request<{
@@ -282,6 +283,12 @@ export const api = {
     request<{ ok: boolean }>("/api/wallet/pin", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  setLanguage: (language: "ar" | "en") =>
+    request<{ language: "ar" | "en" }>("/api/wallet/language", {
+      method: "POST",
+      body: JSON.stringify({ language }),
     }),
 
   reportTransaction: (transactionId: string) =>

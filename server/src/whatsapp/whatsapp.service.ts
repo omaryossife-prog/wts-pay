@@ -5,6 +5,10 @@
 //
 // MEDIA POLICY: ID photos and face videos are never downloaded or stored.
 // We only record metadata. Admins review media inside WhatsApp.
+//
+// LANGUAGE: every exported function that returns user-facing text takes a
+// `lang` parameter ("ar" | "en"). Callers (whatsapp.handler.ts) pass the
+// user's stored language (user.language, default "ar"). See ../i18n/lang.ts.
 // ---------------------------------------------------------------------------
 import { prisma } from "../utils/prisma.js";
 import { computeFee } from "../services/fee.service.js";
@@ -28,6 +32,7 @@ import {
 } from "../services/registration.service.js";
 import { logger } from "../utils/logger.js";
 import type { Db } from "../utils/prisma.js";
+import { type Lang, tr, normalizeLang } from "../i18n/lang.js";
 
 export const SESSION_TTL_MS = 10 * 60 * 1000;
 
@@ -73,6 +78,15 @@ export async function getUserByWaIdentity(db: Db, waId: string, phoneDigits: str
   return findByWhatsAppIdentity(db, waId, phoneDigits);
 }
 
+export async function getUserLanguage(userId: string): Promise<Lang> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { language: true } });
+  return normalizeLang(user?.language);
+}
+
+export async function setUserLanguage(userId: string, lang: Lang): Promise<void> {
+  await prisma.user.update({ where: { id: userId }, data: { language: lang } });
+}
+
 export async function getSession(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -106,87 +120,102 @@ export async function maintenanceActive(): Promise<{ enabled: boolean; message: 
 
 // ---------------- Registration steps ----------------
 
-export async function startRegistration(waId: string, phoneDigits: string, profileName?: string) {
-  const user = await createRegistration(prisma, { waId, phoneDigits, profileName });
+export async function startRegistration(waId: string, phoneDigits: string, profileName?: string, lang: Lang = "ar") {
+  const user = await createRegistration(prisma, { waId, phoneDigits, profileName, language: lang });
   await setSession(user.id, SessionState.REG_NAME, {});
-  return (
-    "Your WhatsApp account is not registered with WTS Pay.\n" +
-    "Would you like to create a new account?"
+  return tr(
+    lang,
+    "رقم الواتساب بتاعك مش مسجّل في WTS Pay.\nعايز تعمل حساب جديد؟",
+    "Your WhatsApp account is not registered with WTS Pay.\nWould you like to create a new account?"
   );
 }
 
-export async function handleNameInput(userId: string, raw: string): Promise<{ text: string; ok: boolean }> {
-  const v = validateFourPartName(raw);
-  if (!v.ok || !v.fullName) return { text: v.error ?? "Invalid name.", ok: false };
+export async function handleNameInput(userId: string, raw: string, lang: Lang = "ar"): Promise<{ text: string; ok: boolean }> {
+  const v = validateFourPartName(raw, lang);
+  if (!v.ok || !v.fullName) return { text: v.error ?? tr(lang, "الاسم غير صحيح.", "Invalid name."), ok: false };
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { whatsappPhone: true } });
   await recordFullName(prisma, userId, v.fullName);
   await setSession(userId, SessionState.REG_CONFIRM_NUMBER, {});
   return {
-    text: `Full name recorded: ${v.fullName}\n\nWhatsApp number:\n${user?.whatsappPhone ?? ""}\nIs this your WhatsApp number?`,
+    text: tr(
+      lang,
+      `تم تسجيل الاسم: ${v.fullName}\n\nرقم الواتساب:\n${user?.whatsappPhone ?? ""}\nده رقم الواتساب بتاعك؟`,
+      `Full name recorded: ${v.fullName}\n\nWhatsApp number:\n${user?.whatsappPhone ?? ""}\nIs this your WhatsApp number?`
+    ),
     ok: true,
   };
 }
 
-export async function confirmNumberYes(userId: string): Promise<string> {
+export async function confirmNumberYes(userId: string, lang: Lang = "ar"): Promise<string> {
   await setSession(userId, SessionState.REG_ID_FRONT, {});
-  return "\u{1F4CE} Please send a clear photo of the front of your ID card.";
+  return tr(lang, "\u{1F4CE} من فضلك ابعت صورة واضحة لوش البطاقة الشخصية.", "\u{1F4CE} Please send a clear photo of the front of your ID card.");
 }
 
-export const NUMBER_NO_TEXT =
-  "The WhatsApp identity received from the official API is the authoritative channel identity, " +
-  "so an account can only be created for this exact WhatsApp number. " +
-  "If this is not your number, please continue from your own WhatsApp account.";
+export function numberNoText(lang: Lang = "ar"): string {
+  return tr(
+    lang,
+    "رقم الواتساب اللي بيوصلنا من الـ API الرسمي هو هوية القناة المعتمدة، فمينفعش نعمل حساب غير بنفس رقم الواتساب ده بالظبط. لو ده مش رقمك، كمّل من حساب الواتساب بتاعك إنت.",
+    "The WhatsApp identity received from the official API is the authoritative channel identity, so an account can only be created for this exact WhatsApp number. If this is not your number, please continue from your own WhatsApp account."
+  );
+}
+// Backward-compatible constant (Arabic default) kept for any stray imports.
+export const NUMBER_NO_TEXT = numberNoText("ar");
 
 // ID front/back and face video: metadata only. We intentionally never fetch or
 // store the media (acceptance criterion 7).
-export async function handleIdFront(userId: string): Promise<string> {
+export async function handleIdFront(userId: string, lang: Lang = "ar"): Promise<string> {
   await recordIdSubmitted(prisma, userId);
   await setSession(userId, SessionState.REG_ID_BACK, {});
-  return "ID front received.\nNow send a clear photo of the back of your ID card.";
+  return tr(lang, "تم استلام وش البطاقة.\nدلوقتي ابعت صورة واضحة لضهر البطاقة الشخصية.", "ID front received.\nNow send a clear photo of the back of your ID card.");
 }
 
-export async function handleIdBack(userId: string): Promise<string> {
+export async function handleIdBack(userId: string, lang: Lang = "ar"): Promise<string> {
   await setSession(userId, SessionState.REG_FACE_VIDEO, {});
-  return (
+  return tr(
+    lang,
+    "\u{1F3A5} آخر خطوة في التحقق.\n" +
+      "ابعت فيديو قصير لوشك، حوالي 5-10 ثواني.\n" +
+      "خلي وشك واضح والإضاءة كويسة.",
     "\u{1F3A5} Final verification step.\n" +
-    "Please send a short video of your face, around 5\u201310 seconds.\n" +
-    "Make sure your face is clearly visible and the lighting is good."
+      "Please send a short video of your face, around 5\u201310 seconds.\n" +
+      "Make sure your face is clearly visible and the lighting is good."
   );
 }
 
-export async function handleFaceVideo(userId: string): Promise<string> {
+export async function handleFaceVideo(userId: string, lang: Lang = "ar"): Promise<string> {
   await recordFaceVideoSubmitted(prisma, userId);
   await setSession(userId, SessionState.IDLE, {});
-  return (
-    "Your registration has been submitted for review. \u2705\n" +
-    "Please wait for approval. You will be notified here."
+  return tr(
+    lang,
+    "تم إرسال طلب التسجيل بتاعك للمراجعة. \u2705\nمن فضلك استنى الموافقة. هنبلّغك هنا.",
+    "Your registration has been submitted for review. \u2705\nPlease wait for approval. You will be notified here."
   );
 }
 
 // ---------------- PIN setup ----------------
 
-export async function handlePinCreateInput(userId: string, raw: string): Promise<{ text: string; ok: boolean }> {
+export async function handlePinCreateInput(userId: string, raw: string, lang: Lang = "ar"): Promise<{ text: string; ok: boolean }> {
   const pin = raw.trim();
   if (!/^\d{6}$/.test(pin)) {
-    return { text: "The PIN must be exactly 6 digits. Try again.", ok: false };
+    return { text: tr(lang, "الرقم السري لازم يكون 6 أرقام بالظبط. جرّب تاني.", "The PIN must be exactly 6 digits. Try again."), ok: false };
   }
   await setSession(userId, SessionState.PIN_CONFIRM, { pendingPin: pin });
-  return { text: "Confirm your PIN by entering the same 6 digits again.", ok: true };
+  return { text: tr(lang, "أكّد الرقم السري بكتابة نفس الـ 6 أرقام تاني.", "Confirm your PIN by entering the same 6 digits again."), ok: true };
 }
 
-export async function handlePinConfirmInput(userId: string, raw: string): Promise<{ text: string; ok: boolean }> {
+export async function handlePinConfirmInput(userId: string, raw: string, lang: Lang = "ar"): Promise<{ text: string; ok: boolean }> {
   const session = await getSession(userId);
   if (!session.data.pendingPin) {
     await setSession(userId, SessionState.PIN_CREATE, {});
-    return { text: "Let's start over. Create your 6-digit WTS PIN:", ok: false };
+    return { text: tr(lang, "نبدأ من الأول. اعمل رقم سري من 6 أرقام:", "Let's start over. Create your 6-digit WTS PIN:"), ok: false };
   }
   if (raw.trim() !== session.data.pendingPin) {
     await setSession(userId, SessionState.PIN_CREATE, {});
-    return { text: "PINs did not match. Create your 6-digit WTS PIN again:", ok: false };
+    return { text: tr(lang, "الرقمين مش متطابقين. اعمل الرقم السري من 6 أرقام تاني:", "PINs did not match. Create your 6-digit WTS PIN again:"), ok: false };
   }
-  await setPin(prisma, { userId, pin: session.data.pendingPin });
+  await setPin(prisma, { userId, pin: session.data.pendingPin, lang });
   await setSession(userId, SessionState.IDLE, {});
-  return { text: "\u{1F512} Your WTS transaction PIN is set. Your wallet is fully active. Type *menu*.", ok: true };
+  return { text: tr(lang, "\u{1F512} الرقم السري اتسجّل. محفظتك بقت شغالة بالكامل. اكتب *menu*.", "\u{1F512} Your WTS transaction PIN is set. Your wallet is fully active. Type *menu*."), ok: true };
 }
 
 // Called by the WhatsApp Flow data-exchange endpoint when a Flow-based PIN
@@ -198,105 +227,142 @@ export async function completePinFromFlow(userId: string, pin: string) {
 
 // ---------------- Menu actions ----------------
 
-export async function getBalanceText(userId: string): Promise<string> {
+export async function getBalanceText(userId: string, lang: Lang = "ar"): Promise<string> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { demoBalance: true, status: true, wtsId: true, walletId: true },
   });
-  if (!user) return "Account not found.";
-  if (user.status !== "ACTIVE") return "Your account is frozen. Contact support.";
-  return (
+  if (!user) return tr(lang, "الحساب مش موجود.", "Account not found.");
+  if (user.status !== "ACTIVE") return tr(lang, "حسابك مجمّد. تواصل مع الدعم.", "Your account is frozen. Contact support.");
+  return tr(
+    lang,
+    `كود WTS: ${user.wtsId ?? "قيد الإصدار"}\n` +
+      `رصيدك التجريبي ${user.demoBalance} جنيه.\n` +
+      `_(الأرصدة التجريبية مالهاش قيمة نقدية ومتسحبش.)_`,
     `WTS ID: ${user.wtsId ?? "pending"}\n` +
-    `Your demo balance is ${user.demoBalance} EGP.\n` +
-    `_(Demo credits have no cash value and cannot be withdrawn.)_`
+      `Your demo balance is ${user.demoBalance} EGP.\n` +
+      `_(Demo credits have no cash value and cannot be withdrawn.)_`
   );
 }
 
-export async function getTransactionsText(userId: string): Promise<string> {
+export async function getTransactionsText(userId: string, lang: Lang = "ar"): Promise<string> {
   const txs = await prisma.transaction.findMany({
     where: { OR: [{ senderId: userId }, { receiverId: userId }] },
     orderBy: { createdAt: "desc" },
     take: 10,
     include: { sender: { select: { phone: true } }, receiver: { select: { phone: true } } },
   });
-  if (txs.length === 0) return "No transactions yet.";
+  if (txs.length === 0) return tr(lang, "لسه مفيش عمليات.", "No transactions yet.");
   const lines = txs.map((t) => {
-    const dir = t.senderId === userId ? "sent" : "received";
+    const dir = t.senderId === userId ? tr(lang, "اتبعت", "sent") : tr(lang, "اتستلم", "received");
     const other = t.senderId === userId ? t.receiver?.phone ?? "?" : t.sender?.phone ?? "?";
-    return `\u2022 ${t.amount} EGP ${dir} (with ${other}) ${t.type.toLowerCase()}`;
+    return tr(lang, `\u2022 ${t.amount} جنيه ${dir} (مع ${other}) ${t.type.toLowerCase()}`, `\u2022 ${t.amount} EGP ${dir} (with ${other}) ${t.type.toLowerCase()}`);
   });
-  return "Recent transactions:\n" + lines.join("\n");
+  return tr(lang, "آخر العمليات:\n", "Recent transactions:\n") + lines.join("\n");
 }
 
-export async function getReferralText(userId: string): Promise<string> {
+export async function getReferralText(userId: string, lang: Lang = "ar"): Promise<string> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { referralCode: true, referralCount: true } });
   const rewarded = await prisma.referral.count({ where: { referrerId: userId, status: "REWARDED" } });
-  if (!user) return "Account not found.";
-  return (
+  if (!user) return tr(lang, "الحساب مش موجود.", "Account not found.");
+  return tr(
+    lang,
+    `كود الإحالة بتاعك: *${user.referralCode}*\n` +
+      `شاركه مع أصحابك! بعد ما يسجّلوا ويتحقق حسابهم ويعملوا أول تحويل، هتاخد مكافأة الإحالة.\n\n` +
+      `المدعوين: ${user.referralCount} \u2022 اللي اتكافأوا: ${rewarded}\n` +
+      `_(المكافآت بتتصرف بعد فحوصات مكافحة الاحتيال بس.)_`,
     `Your referral code: *${user.referralCode}*\n` +
-    `Share it with friends! After they sign up, get verified and complete their first transfer, you earn the referral reward.\n\n` +
-    `Invited: ${user.referralCount} \u2022 Rewarded: ${rewarded}\n` +
-    `_(Referrals are only rewarded after anti-abuse checks.)_`
+      `Share it with friends! After they sign up, get verified and complete their first transfer, you earn the referral reward.\n\n` +
+      `Invited: ${user.referralCount} \u2022 Rewarded: ${rewarded}\n` +
+      `_(Referrals are only rewarded after anti-abuse checks.)_`
   );
 }
 
-export async function getAccountText(userId: string): Promise<string> {
+export async function getAccountText(userId: string, lang: Lang = "ar"): Promise<string> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { username: true, phone: true, fullName: true, wtsId: true, walletId: true, demoBalance: true, status: true, transfersEnabled: true, verificationStatus: true, createdAt: true },
   });
-  if (!user) return "Account not found.";
-  return (
+  if (!user) return tr(lang, "الحساب مش موجود.", "Account not found.");
+  return tr(
+    lang,
+    `*حسابي*\n` +
+      `الاسم الكامل: ${user.fullName ?? "-"}\nكود WTS: ${user.wtsId ?? "-"}\nالمحفظة: ${user.walletId ?? "-"}\n` +
+      `الموبايل: ${user.phone}\nالحالة: ${user.status}\nالتحقق: ${user.verificationStatus}\n` +
+      `التحويلات: ${user.transfersEnabled ? "مفعّلة" : "متوقفة"}\n` +
+      `الرصيد التجريبي: ${user.demoBalance} جنيه\nعضو من: ${user.createdAt.toDateString()}\n\n` +
+      `_اكتب "اللغة" في أي وقت عشان تغيّر لغة المحادثة._`,
     `*My Account*\n` +
-    `Full name: ${user.fullName ?? "-"}\nWTS ID: ${user.wtsId ?? "-"}\nWallet: ${user.walletId ?? "-"}\n` +
-    `Phone: ${user.phone}\nStatus: ${user.status}\nVerification: ${user.verificationStatus}\n` +
-    `Transfers: ${user.transfersEnabled ? "enabled" : "disabled"}\n` +
-    `Demo balance: ${user.demoBalance} EGP\nMember since: ${user.createdAt.toDateString()}`
+      `Full name: ${user.fullName ?? "-"}\nWTS ID: ${user.wtsId ?? "-"}\nWallet: ${user.walletId ?? "-"}\n` +
+      `Phone: ${user.phone}\nStatus: ${user.status}\nVerification: ${user.verificationStatus}\n` +
+      `Transfers: ${user.transfersEnabled ? "enabled" : "disabled"}\n` +
+      `Demo balance: ${user.demoBalance} EGP\nMember since: ${user.createdAt.toDateString()}\n\n` +
+      `_Type "language" any time to change the bot's language._`
   );
 }
 
-export const HELP_TEXT =
-  "*WTS Pay Help* (Demo)\n\n" +
-  "\u2022 Balances are DEMO credits - no cash value, no withdrawals.\n" +
-  "\u2022 Send: choose Send Money, recipient, amount, confirm, then enter your WTS PIN.\n" +
-  "\u2022 Fee: 1 EGP per started 1000 EGP.\n" +
-  "\u2022 Your WTS PIN (6 digits) authorizes transfers - never share it.\n" +
-  "\u2022 Referrals reward you after your invitee is verified and completes their first transfer.\n\n" +
-  "Support: support@wtspay.demo";
+export function helpText(lang: Lang = "ar"): string {
+  return tr(
+    lang,
+    "*مساعدة WTS Pay* (تجريبي)\n\n" +
+      "\u2022 الأرصدة تجريبية - مالهاش قيمة نقدية ومتتسحبش.\n" +
+      "\u2022 التحويل: اختار تحويل فلوس، المستلم، المبلغ، أكّد، وبعدين اكتب الرقم السري.\n" +
+      "\u2022 العمولة: جنيه واحد لكل 1000 جنيه أو جزء منه.\n" +
+      "\u2022 الرقم السري (6 أرقام) بيأمّن التحويلات - متشاركهوش مع حد.\n" +
+      "\u2022 الإحالات بتكسبك مكافأة بعد ما اللي دعوته يتحقق ويعمل أول تحويل.\n\n" +
+      "الدعم: support@wtspay.demo",
+    "*WTS Pay Help* (Demo)\n\n" +
+      "\u2022 Balances are DEMO credits - no cash value, no withdrawals.\n" +
+      "\u2022 Send: choose Send Money, recipient, amount, confirm, then enter your WTS PIN.\n" +
+      "\u2022 Fee: 1 EGP per started 1000 EGP.\n" +
+      "\u2022 Your WTS PIN (6 digits) authorizes transfers - never share it.\n" +
+      "\u2022 Referrals reward you after your invitee is verified and completes their first transfer.\n\n" +
+      "Support: support@wtspay.demo"
+  );
+}
+// Backward-compatible constant (Arabic default) kept for any stray imports.
+export const HELP_TEXT = helpText("ar");
 
 // ---------------- Send money with PIN authorization ----------------
 
-export async function beginSendMoney(userId: string): Promise<string> {
+export async function beginSendMoney(userId: string, lang: Lang = "ar"): Promise<string> {
   await setSession(userId, SessionState.SEND_WAIT_PHONE, {});
-  return "Please enter the recipient's WTS phone number (with country code, e.g. +2010\u2026).";
+  return tr(lang, "اكتب رقم واتساب المستلم (مع كود الدولة، مثلاً +2010...).", "Please enter the recipient's WTS phone number (with country code, e.g. +2010\u2026).");
 }
 
-export async function handlePhoneInput(userId: string, phone: string): Promise<{ text: string; ok: boolean }> {
+export async function handlePhoneInput(userId: string, phone: string, lang: Lang = "ar"): Promise<{ text: string; ok: boolean }> {
   const clean = phone.replace(/[\s\-()]/g, "");
   if (!/^\+?[0-9]{8,15}$/.test(clean)) {
-    return { text: "That doesn't look like a valid phone number. Try again (e.g. +2010xxxxxxx).", ok: false };
+    return { text: tr(lang, "ده مش رقم موبايل صحيح. جرّب تاني (مثال: +2010xxxxxxx).", "That doesn't look like a valid phone number. Try again (e.g. +2010xxxxxxx)."), ok: false };
   }
   const recipient = await prisma.user.findUnique({ where: { phone: normalizeWaPhone(clean.replace("+", "")) } });
-  if (!recipient) return { text: "No WTS user found with that phone number. Try again or type *menu*.", ok: false };
-  if (recipient.id === userId) return { text: "You cannot send money to yourself.", ok: false };
-  if (recipient.status !== "ACTIVE") return { text: "That account is frozen.", ok: false };
-  if (recipient.verificationStatus !== "VERIFIED") return { text: "That account is not verified yet.", ok: false };
-  if (recipient.transfersEnabled === false) return { text: "That account cannot receive transfers right now.", ok: false };
+  if (!recipient) return { text: tr(lang, "مفيش مستخدم WTS بالرقم ده. جرّب تاني أو اكتب *menu*.", "No WTS user found with that phone number. Try again or type *menu*."), ok: false };
+  if (recipient.id === userId) return { text: tr(lang, "متقدرش تبعت فلوس لنفسك.", "You cannot send money to yourself."), ok: false };
+  if (recipient.status !== "ACTIVE") return { text: tr(lang, "الحساب ده مجمّد.", "That account is frozen."), ok: false };
+  if (recipient.verificationStatus !== "VERIFIED") return { text: tr(lang, "الحساب ده لسه مش متحقق منه.", "That account is not verified yet."), ok: false };
+  if (recipient.transfersEnabled === false) return { text: tr(lang, "الحساب ده مش بيقدر يستقبل تحويلات دلوقتي.", "That account cannot receive transfers right now."), ok: false };
   await setSession(userId, SessionState.SEND_WAIT_AMOUNT, {
     recipientId: recipient.id,
     recipientPhone: recipient.phone,
     recipientWtsId: recipient.wtsId ?? undefined,
     recipientName: recipient.fullName ?? recipient.username,
   });
-  return { text: `Sending to *${recipient.fullName ?? recipient.username}* (${recipient.wtsId ?? recipient.phone}).\nEnter the amount in EGP:`, ok: true };
+  return {
+    text: tr(
+      lang,
+      `بتحوّل لـ *${recipient.fullName ?? recipient.username}* (${recipient.wtsId ?? recipient.phone}).\nاكتب المبلغ بالجنيه:`,
+      `Sending to *${recipient.fullName ?? recipient.username}* (${recipient.wtsId ?? recipient.phone}).\nEnter the amount in EGP:`
+    ),
+    ok: true,
+  };
 }
 
-export async function handleAmountInput(userId: string, raw: string): Promise<{ text: string; askEscrow: true } | { text: string; ok: false }> {
+export async function handleAmountInput(userId: string, raw: string, lang: Lang = "ar"): Promise<{ text: string; askEscrow: true } | { text: string; ok: false }> {
   const amount = Number(raw.replace(/[^0-9]/g, ""));
-  if (!Number.isInteger(amount) || amount <= 0) return { text: "Enter a whole number amount greater than 0, e.g. 500.", ok: false };
+  if (!Number.isInteger(amount) || amount <= 0) return { text: tr(lang, "اكتب مبلغ صحيح أكبر من 0، مثلاً 500.", "Enter a whole number amount greater than 0, e.g. 500."), ok: false };
   const limits = await getLimitsConfig(prisma);
   if (amount < limits.minTransfer || amount > limits.maxTransfer) {
-    return { text: `Amount must be between ${limits.minTransfer} and ${limits.maxTransfer} EGP.`, ok: false };
+    return { text: tr(lang, `المبلغ لازم يكون بين ${limits.minTransfer} و ${limits.maxTransfer} جنيه.`, `Amount must be between ${limits.minTransfer} and ${limits.maxTransfer} EGP.`), ok: false };
   }
   const { fee, totalDebit } = await computeFee(prisma, amount);
   const session = await getSession(userId);
@@ -305,73 +371,87 @@ export async function handleAmountInput(userId: string, raw: string): Promise<{ 
   return {
     text:
       (warning ? `${warning}\n\n` : "") +
-      "\u{1F6E1}\uFE0F Enable Anti-Fraud protection for this transfer?\n" +
-      "Recommended for people you don't know well — you'll be able to report this transfer if something feels wrong.",
+      tr(
+        lang,
+        "\u{1F6E1}\uFE0F تفعّل حماية مكافحة الاحتيال للتحويل ده؟\nمفضّل لو بتحوّل لحد مش عارفه كويس — هتقدر تبلّغ عن التحويل لو حسّيت بحاجة غلط.",
+        "\u{1F6E1}\uFE0F Enable Anti-Fraud protection for this transfer?\nRecommended for people you don't know well — you'll be able to report this transfer if something feels wrong."
+      ),
     askEscrow: true,
   };
 }
 
-function buildConfirmationSummary(session: { data: WaSessionData }) {
+function buildConfirmationSummary(session: { data: WaSessionData }, lang: Lang): string {
   const { recipientWtsId, recipientPhone, amount, fee, totalDebit, escrowEnabled } = session.data;
-  return (
+  return tr(
+    lang,
+    `تأكيد التحويل\n` +
+      `المستلم:\n${recipientWtsId ?? recipientPhone}\n` +
+      `المبلغ:\n${amount!.toLocaleString()} جنيه\n` +
+      `العمولة:\n${fee} جنيه\n` +
+      `الإجمالي:\n${totalDebit!.toLocaleString()} جنيه` +
+      (escrowEnabled ? `\n\u{1F6E1}\uFE0F حماية مكافحة الاحتيال: مفعّلة` : ""),
     `Confirm Transfer\n` +
-    `Recipient:\n${recipientWtsId ?? recipientPhone}\n` +
-    `Amount:\n${amount!.toLocaleString()} EGP\n` +
-    `Fee:\n${fee} EGP\n` +
-    `Total:\n${totalDebit!.toLocaleString()} EGP` +
-    (escrowEnabled ? `\n\u{1F6E1}\uFE0F Anti-Fraud protection: ON` : "")
+      `Recipient:\n${recipientWtsId ?? recipientPhone}\n` +
+      `Amount:\n${amount!.toLocaleString()} EGP\n` +
+      `Fee:\n${fee} EGP\n` +
+      `Total:\n${totalDebit!.toLocaleString()} EGP` +
+      (escrowEnabled ? `\n\u{1F6E1}\uFE0F Anti-Fraud protection: ON` : "")
   );
 }
 
-export async function handleEscrowChoice(userId: string, enabled: boolean): Promise<{ text: string; summary: string }> {
+export async function handleEscrowChoice(userId: string, enabled: boolean, lang: Lang = "ar"): Promise<{ text: string; summary: string }> {
   const session = await getSession(userId);
   await setSession(userId, SessionState.SEND_CONFIRMATION, { ...session.data, escrowEnabled: enabled });
-  const summary = buildConfirmationSummary({ data: { ...session.data, escrowEnabled: enabled } });
+  const summary = buildConfirmationSummary({ data: { ...session.data, escrowEnabled: enabled } }, lang);
   return { text: summary, summary };
 }
 
 // Button press "Confirm Transfer" -> create the pending authorization. The
 // transfer itself does NOT execute until the PIN is verified.
-export async function confirmTransfer(userId: string): Promise<{ text: string; authorizationId?: string }> {
+export async function confirmTransfer(userId: string, lang: Lang = "ar"): Promise<{ text: string; authorizationId?: string }> {
   const session = await getSession(userId);
   const { recipientPhone, amount, escrowEnabled } = session.data;
   if (!recipientPhone || !amount) {
     await setSession(userId, SessionState.IDLE, {});
-    return { text: "Session expired. Type *menu* to start again." };
+    return { text: tr(lang, "الجلسة خلصت. اكتب *menu* عشان تبدأ تاني.", "Session expired. Type *menu* to start again.") };
   }
   try {
     const auth = await createTransferAuthorization(prisma, { senderId: userId, recipientPhone, amount, escrowEnabled });
     await setSession(userId, SessionState.SEND_PIN, { ...session.data, authorizationId: auth.authorizationId });
     return {
-      text: `\u{1F512} Confirm WTS Transfer\nEnter your 6-digit WTS PIN to authorize ${auth.amount.toLocaleString()} EGP (total ${auth.total.toLocaleString()} EGP).`,
+      text: tr(
+        lang,
+        `\u{1F512} تأكيد تحويل WTS\nاكتب الرقم السري من 6 أرقام عشان تأكد تحويل ${auth.amount.toLocaleString()} جنيه (الإجمالي ${auth.total.toLocaleString()} جنيه).`,
+        `\u{1F512} Confirm WTS Transfer\nEnter your 6-digit WTS PIN to authorize ${auth.amount.toLocaleString()} EGP (total ${auth.total.toLocaleString()} EGP).`
+      ),
       authorizationId: auth.authorizationId,
     };
   } catch (err: any) {
     await setSession(userId, SessionState.IDLE, {});
-    return { text: `Could not prepare the transfer: ${err.message ?? "unknown error"}. Type *menu* to try again.` };
+    return { text: tr(lang, `معرفناش نجهّز التحويل: ${err.message ?? "خطأ غير معروف"}. اكتب *menu* عشان تحاول تاني.`, `Could not prepare the transfer: ${err.message ?? "unknown error"}. Type *menu* to try again.`) };
   }
 }
 
-export async function cancelTransfer(userId: string): Promise<string> {
+export async function cancelTransfer(userId: string, lang: Lang = "ar"): Promise<string> {
   const session = await getSession(userId);
   if (session.data.authorizationId) {
     await cancelAuthorization(prisma, { authorizationId: session.data.authorizationId, senderId: userId }).catch(() => {});
   }
   await setSession(userId, SessionState.IDLE, {});
-  return "Transfer cancelled. Type *menu* for the main menu.";
+  return tr(lang, "اتلغى التحويل. اكتب *menu* عشان تفتح القائمة الرئيسية.", "Transfer cancelled. Type *menu* for the main menu.");
 }
 
 // PIN entered for an authorization -> verify -> execute exactly once.
-export async function handleAuthorizationPin(userId: string, raw: string): Promise<string> {
+export async function handleAuthorizationPin(userId: string, raw: string, lang: Lang = "ar"): Promise<string> {
   const pin = raw.trim();
   const session = await getSession(userId);
-  if (!/^\d{6}$/.test(pin)) return "Enter your 6-digit WTS PIN (numbers only).";
+  if (!/^\d{6}$/.test(pin)) return tr(lang, "اكتب الرقم السري من 6 أرقام (أرقام بس).", "Enter your 6-digit WTS PIN (numbers only).");
   if (!session.data.authorizationId) {
     await setSession(userId, SessionState.IDLE, {});
-    return "No pending transfer. Type *menu* to start again.";
+    return tr(lang, "مفيش تحويل معلّق. اكتب *menu* عشان تبدأ تاني.", "No pending transfer. Type *menu* to start again.");
   }
   try {
-    await verifyPin(prisma, { userId, pin });
+    await verifyPin(prisma, { userId, pin, lang });
   } catch (err: any) {
     if (err instanceof PinError && err.code === "PIN_LOCKED") {
       await setSession(userId, SessionState.IDLE, {});
@@ -379,9 +459,9 @@ export async function handleAuthorizationPin(userId: string, raw: string): Promi
     }
     if (err instanceof PinError && err.code === "PIN_NOT_SET") {
       await setSession(userId, SessionState.IDLE, {});
-      return "You have no WTS PIN yet. Type *menu* and create your PIN first.";
+      return tr(lang, "لسه معملتش رقم سري. اكتب *menu* واعمل الرقم السري الأول.", "You have no WTS PIN yet. Type *menu* and create your PIN first.");
     }
-    return err.message ?? "Incorrect PIN.";
+    return err.message ?? tr(lang, "الرقم السري غلط.", "Incorrect PIN.");
   }
   try {
     const { authorization, transaction, duplicate } = await executeAuthorizedTransfer(prisma, {
@@ -390,62 +470,69 @@ export async function handleAuthorizationPin(userId: string, raw: string): Promi
     });
     await evaluateReferralEligibility(prisma, userId).catch(() => {});
     await setSession(userId, SessionState.IDLE, {});
-    if (duplicate) return "This transfer was already processed.";
-    return (
+    if (duplicate) return tr(lang, "التحويل ده كان اتنفّذ بالفعل.", "This transfer was already processed.");
+    return tr(
+      lang,
+      `\u2705 التحويل تم بنجاح\n` +
+        `اتبعت:\n${transaction.amount.toLocaleString()} جنيه\n` +
+        `العمولة:\n${transaction.fee} جنيه\n` +
+        `الإجمالي:\n${transaction.totalDebit.toLocaleString()} جنيه\n` +
+        `المستلم:\n${authorization.recipientWtsId ?? authorization.recipientPhone}\n\n` +
+        `حالة التفويض: ${authorization.status}. اكتب *menu* عشان تفتح القائمة الرئيسية.`,
       `\u2705 Transfer successful\n` +
-      `Sent:\n${transaction.amount.toLocaleString()} EGP\n` +
-      `Fee:\n${transaction.fee} EGP\n` +
-      `Total:\n${transaction.totalDebit.toLocaleString()} EGP\n` +
-      `Recipient:\n${authorization.recipientWtsId ?? authorization.recipientPhone}\n\n` +
-      `Authorization ${authorization.status}. Type *menu* for the main menu.`
+        `Sent:\n${transaction.amount.toLocaleString()} EGP\n` +
+        `Fee:\n${transaction.fee} EGP\n` +
+        `Total:\n${transaction.totalDebit.toLocaleString()} EGP\n` +
+        `Recipient:\n${authorization.recipientWtsId ?? authorization.recipientPhone}\n\n` +
+        `Authorization ${authorization.status}. Type *menu* for the main menu.`
     );
   } catch (err: any) {
     await setSession(userId, SessionState.IDLE, {});
-    return `Transfer failed: ${err.message ?? "unknown error"}. Type *menu* to try again.`;
+    return tr(lang, `التحويل فشل: ${err.message ?? "خطأ غير معروف"}. اكتب *menu* عشان تحاول تاني.`, `Transfer failed: ${err.message ?? "unknown error"}. Type *menu* to try again.`);
   }
 }
 
 // ---------------- Money requests (ask someone to pay you) ----------------
 
-export async function getRequestsMenuRows(userId: string): Promise<WaListSectionRow[]> {
+export async function getRequestsMenuRows(userId: string, lang: Lang = "ar"): Promise<WaListSectionRow[]> {
   const pending = await listIncomingRequests(prisma, userId);
   const rows: WaListSectionRow[] = pending.slice(0, 9).map((r: any) => ({
     id: `req_view_${r.id}`,
-    title: `${r.amount} EGP`,
-    description: `from ${r.requester?.username ?? "WTS user"}`,
+    title: tr(lang, `${r.amount} جنيه`, `${r.amount} EGP`),
+    description: tr(lang, `من ${r.requester?.username ?? "مستخدم WTS"}`, `from ${r.requester?.username ?? "WTS user"}`),
   }));
-  rows.push({ id: "req_new", title: "\u2795 Request money", description: "Ask someone to pay you" });
+  rows.push({ id: "req_new", title: tr(lang, "\u2795 اطلب فلوس", "\u2795 Request money"), description: tr(lang, "اطلب من حد يدفعلك", "Ask someone to pay you") });
   return rows;
 }
 
-export async function beginMoneyRequest(userId: string): Promise<string> {
+export async function beginMoneyRequest(userId: string, lang: Lang = "ar"): Promise<string> {
   await setSession(userId, SessionState.REQ_WAIT_PHONE, {});
-  return "Who do you want to request money from? Enter their WhatsApp number (e.g. +2010\u2026).";
+  return tr(lang, "عايز تطلب فلوس من مين؟ اكتب رقم الواتساب بتاعه (مثلاً +2010...).", "Who do you want to request money from? Enter their WhatsApp number (e.g. +2010\u2026).");
 }
 
-export async function handleRequestPhoneInput(userId: string, phone: string): Promise<{ text: string; ok: boolean }> {
+export async function handleRequestPhoneInput(userId: string, phone: string, lang: Lang = "ar"): Promise<{ text: string; ok: boolean }> {
   const clean = phone.replace(/[\s\-()]/g, "");
   if (!/^\+?[0-9]{8,15}$/.test(clean)) {
-    return { text: "That doesn't look like a valid phone number. Try again (e.g. +2010xxxxxxx).", ok: false };
+    return { text: tr(lang, "ده مش رقم موبايل صحيح. جرّب تاني (مثال: +2010xxxxxxx).", "That doesn't look like a valid phone number. Try again (e.g. +2010xxxxxxx)."), ok: false };
   }
   const payer = await prisma.user.findUnique({ where: { phone: normalizeWaPhone(clean.replace("+", "")) } });
-  if (!payer) return { text: "No WTS user found with that phone number. Try again or type *menu*.", ok: false };
-  if (payer.id === userId) return { text: "You cannot request money from yourself.", ok: false };
+  if (!payer) return { text: tr(lang, "مفيش مستخدم WTS بالرقم ده. جرّب تاني أو اكتب *menu*.", "No WTS user found with that phone number. Try again or type *menu*."), ok: false };
+  if (payer.id === userId) return { text: tr(lang, "متقدرش تطلب فلوس من نفسك.", "You cannot request money from yourself."), ok: false };
   await setSession(userId, SessionState.REQ_WAIT_AMOUNT, {
     recipientPhone: payer.phone,
     recipientName: payer.fullName ?? payer.username,
   });
-  return { text: `Requesting from *${payer.fullName ?? payer.username}*.\nEnter the amount in EGP:`, ok: true };
+  return { text: tr(lang, `بتطلب من *${payer.fullName ?? payer.username}*.\nاكتب المبلغ بالجنيه:`, `Requesting from *${payer.fullName ?? payer.username}*.\nEnter the amount in EGP:`), ok: true };
 }
 
-export async function handleRequestAmountInput(userId: string, raw: string): Promise<string> {
+export async function handleRequestAmountInput(userId: string, raw: string, lang: Lang = "ar"): Promise<string> {
   const amount = Number(raw.replace(/[^0-9]/g, ""));
-  if (!Number.isInteger(amount) || amount <= 0) return "Enter a whole number amount greater than 0, e.g. 500.";
+  if (!Number.isInteger(amount) || amount <= 0) return tr(lang, "اكتب مبلغ صحيح أكبر من 0، مثلاً 500.", "Enter a whole number amount greater than 0, e.g. 500.");
   const session = await getSession(userId);
   const payerPhone = session.data.recipientPhone;
   if (!payerPhone) {
     await setSession(userId, SessionState.IDLE, {});
-    return "Session expired. Type *menu* to start again.";
+    return tr(lang, "الجلسة خلصت. اكتب *menu* عشان تبدأ تاني.", "Session expired. Type *menu* to start again.");
   }
   try {
     const requester = await prisma.user.findUnique({ where: { id: userId } });
@@ -457,82 +544,94 @@ export async function handleRequestAmountInput(userId: string, raw: string): Pro
     await setSession(userId, SessionState.IDLE, {});
     await notifyMoneyRequest(
       payer.whatsappPhone ?? payer.phone,
-      requester?.fullName ?? requester?.username ?? "A WTS user",
+      requester?.fullName ?? requester?.username ?? tr(lang, "مستخدم WTS", "A WTS user"),
       request.amount,
-      request.id
+      request.id,
+      await getUserLanguage(payer.id)
     ).catch(() => {});
-    return `\u2705 Request sent to *${session.data.recipientName ?? payerPhone}* for ${amount.toLocaleString()} EGP. You'll be notified here when they respond.`;
+    return tr(
+      lang,
+      `\u2705 اتبعت الطلب لـ *${session.data.recipientName ?? payerPhone}* بمبلغ ${amount.toLocaleString()} جنيه. هتتبلّغ هنا لما يرد.`,
+      `\u2705 Request sent to *${session.data.recipientName ?? payerPhone}* for ${amount.toLocaleString()} EGP. You'll be notified here when they respond.`
+    );
   } catch (err: any) {
     await setSession(userId, SessionState.IDLE, {});
-    return `Could not send the request: ${err.message ?? "unknown error"}. Type *menu* to try again.`;
+    return tr(lang, `معرفناش نبعت الطلب: ${err.message ?? "خطأ غير معروف"}. اكتب *menu* عشان تحاول تاني.`, `Could not send the request: ${err.message ?? "unknown error"}. Type *menu* to try again.`);
   }
 }
 
-export async function viewIncomingRequest(userId: string, requestId: string): Promise<{ text: string; buttons: { id: string; title: string }[] }> {
+export async function viewIncomingRequest(userId: string, requestId: string, lang: Lang = "ar"): Promise<{ text: string; buttons: { id: string; title: string }[] }> {
   const pending = await listIncomingRequests(prisma, userId);
   const request = pending.find((r: any) => r.id === requestId);
   if (!request) {
-    return { text: "This request is no longer available. Type *menu*.", buttons: [] };
+    return { text: tr(lang, "الطلب ده مش متاح دلوقتي. اكتب *menu*.", "This request is no longer available. Type *menu*."), buttons: [] };
   }
   return {
-    text: `*${request.requester?.username ?? "A WTS user"}* is requesting *${request.amount} EGP* from you.${request.description ? `\nReason: ${request.description}` : ""}`,
+    text: tr(
+      lang,
+      `*${request.requester?.username ?? "مستخدم WTS"}* طالب منك *${request.amount} جنيه*.${request.description ? `\nالسبب: ${request.description}` : ""}`,
+      `*${request.requester?.username ?? "A WTS user"}* is requesting *${request.amount} EGP* from you.${request.description ? `\nReason: ${request.description}` : ""}`
+    ),
     buttons: [
-      { id: `req_accept_${request.id}`, title: "\u2705 Accept" },
-      { id: `req_reject_${request.id}`, title: "\u274C Reject" },
+      { id: `req_accept_${request.id}`, title: tr(lang, "\u2705 قبول", "\u2705 Accept") },
+      { id: `req_reject_${request.id}`, title: tr(lang, "\u274C رفض", "\u274C Reject") },
     ],
   };
 }
 
-export async function rejectIncomingRequest(userId: string, requestId: string): Promise<string> {
+export async function rejectIncomingRequest(userId: string, requestId: string, lang: Lang = "ar"): Promise<string> {
   try {
     const updated = await rejectTransferRequest(prisma, { requestId, payerId: userId });
     const requester = await prisma.user.findUnique({ where: { id: updated.requesterId } });
     if (requester) {
-      await notifyRequestRejected(requester.whatsappPhone ?? requester.phone, updated.amount).catch(() => {});
+      await notifyRequestRejected(requester.whatsappPhone ?? requester.phone, updated.amount, await getUserLanguage(requester.id)).catch(() => {});
     }
-    return "Request rejected.";
+    return tr(lang, "اتم رفض الطلب.", "Request rejected.");
   } catch (err: any) {
-    return err instanceof TransferRequestError ? err.message : "Could not reject this request.";
+    return err instanceof TransferRequestError ? err.message : tr(lang, "معرفناش نرفض الطلب ده.", "Could not reject this request.");
   }
 }
 
-export async function beginAcceptRequest(userId: string, requestId: string): Promise<string> {
+export async function beginAcceptRequest(userId: string, requestId: string, lang: Lang = "ar"): Promise<string> {
   await setSession(userId, SessionState.REQ_PIN, { pendingRequestId: requestId });
-  return "\u{1F512} Enter your 6-digit WTS PIN to accept this request and send the money.";
+  return tr(lang, "\u{1F512} اكتب الرقم السري من 6 أرقام عشان توافق على الطلب وتبعت الفلوس.", "\u{1F512} Enter your 6-digit WTS PIN to accept this request and send the money.");
 }
 
-export async function handleRequestPinInput(userId: string, raw: string): Promise<string> {
+export async function handleRequestPinInput(userId: string, raw: string, lang: Lang = "ar"): Promise<string> {
   const pin = raw.trim();
-  if (!/^\d{6}$/.test(pin)) return "Enter your 6-digit WTS PIN (numbers only).";
+  if (!/^\d{6}$/.test(pin)) return tr(lang, "اكتب الرقم السري من 6 أرقام (أرقام بس).", "Enter your 6-digit WTS PIN (numbers only).");
   const session = await getSession(userId);
   const requestId = session.data.pendingRequestId;
   if (!requestId) {
     await setSession(userId, SessionState.IDLE, {});
-    return "Session expired. Type *menu* to start again.";
+    return tr(lang, "الجلسة خلصت. اكتب *menu* عشان تبدأ تاني.", "Session expired. Type *menu* to start again.");
   }
   try {
     const { transaction } = await acceptTransferRequest(prisma, { requestId, payerId: userId, pin });
     await setSession(userId, SessionState.IDLE, {});
     await notifyTransferReceived(transaction.id).catch(() => {});
-    return `\u2705 Accepted. ${transaction.amount.toLocaleString()} EGP sent. Type *menu* for the main menu.`;
+    return tr(lang, `\u2705 تم القبول. ${transaction.amount.toLocaleString()} جنيه اتبعتوا. اكتب *menu* عشان القائمة الرئيسية.`, `\u2705 Accepted. ${transaction.amount.toLocaleString()} EGP sent. Type *menu* for the main menu.`);
   } catch (err: any) {
     if (err instanceof PinError) {
       return err.message; // includes lockout / attempts-remaining messaging
     }
     await setSession(userId, SessionState.IDLE, {});
     return err instanceof TransferRequestError
-      ? `${err.message} Type *menu*.`
-      : "Could not complete this request. Type *menu* to try again.";
+      ? tr(lang, `${err.message} اكتب *menu*.`, `${err.message} Type *menu*.`)
+      : tr(lang, "معرفناش نكمّل الطلب ده. اكتب *menu* عشان تحاول تاني.", "Could not complete this request. Type *menu* to try again.");
   }
 }
 
 // ── بلاغات النصب: إشعارات المستخدم المبلَّغ عنه ─────────────────────────
-export async function notifyReportFiled(phone: string) {
+export async function notifyReportFiled(phone: string, lang: Lang = "ar") {
   const { sendTextMessage } = await import("./whatsapp.client.js");
   await sendTextMessage(
     phone.replace("+", ""),
-    "\u26A0\uFE0F A complaint was filed against you regarding a recent transaction. " +
-      "Please reply here with any evidence or explanation — our team will review it before taking any action."
+    tr(
+      lang,
+      "\u26A0\uFE0F اتقدّم بلاغ ضدك بخصوص عملية مؤخرًا. من فضلك رد هنا بأي دليل أو توضيح — هيراجعه فريقنا قبل ما ناخد أي إجراء.",
+      "\u26A0\uFE0F A complaint was filed against you regarding a recent transaction. Please reply here with any evidence or explanation — our team will review it before taking any action."
+    )
   );
 }
 
@@ -540,59 +639,75 @@ export async function notifyReportResolved(
   phone: string,
   status: "CONFIRMED" | "DISMISSED",
   banned: boolean,
-  frozenUntil: Date | null
+  frozenUntil: Date | null,
+  lang: Lang = "ar"
 ) {
   const { sendTextMessage } = await import("./whatsapp.client.js");
   if (status === "DISMISSED") {
-    await sendTextMessage(phone.replace("+", ""), "\u2705 The complaint against you was reviewed and dismissed. No action was taken.");
+    await sendTextMessage(phone.replace("+", ""), tr(lang, "\u2705 البلاغ ضدك اتراجع وتم رفضه. مفيش إجراء اتاخد.", "\u2705 The complaint against you was reviewed and dismissed. No action was taken."));
     return;
   }
   if (banned) {
-    await sendTextMessage(phone.replace("+", ""), "\u274C Your wallet has been permanently disabled following repeated confirmed complaints.");
+    await sendTextMessage(phone.replace("+", ""), tr(lang, "\u274C محفظتك اتوقفت نهائيًا بسبب بلاغات متكررة مؤكدة.", "\u274C Your wallet has been permanently disabled following repeated confirmed complaints."));
     return;
   }
   if (frozenUntil) {
     await sendTextMessage(
       phone.replace("+", ""),
-      `\u274C A complaint against you was confirmed. Your wallet is frozen until ${frozenUntil.toLocaleDateString()}.`
+      tr(lang, `\u274C بلاغ ضدك اتأكد. محفظتك مجمّدة لحد ${frozenUntil.toLocaleDateString()}.`, `\u274C A complaint against you was confirmed. Your wallet is frozen until ${frozenUntil.toLocaleDateString()}.`)
     );
     return;
   }
-  await sendTextMessage(phone.replace("+", ""), "\u26A0\uFE0F A complaint against you was confirmed. This is recorded on your account.");
+  await sendTextMessage(phone.replace("+", ""), tr(lang, "\u26A0\uFE0F بلاغ ضدك اتأكد. ده متسجّل في حسابك.", "\u26A0\uFE0F A complaint against you was confirmed. This is recorded on your account."));
 }
 
-export async function notifyFreeze(userPhone: string, frozen: boolean) {
+export async function notifyFreeze(userPhone: string, frozen: boolean, lang: Lang = "ar") {
   const { sendTextMessage } = await import("./whatsapp.client.js");
   await sendTextMessage(
     userPhone.replace("+", ""),
     frozen
-      ? "\u26A0 Your WTS Pay account has been frozen by an administrator. Your balance remains intact. Contact support."
-      : "\u2705 Your WTS Pay account has been unfrozen. Your wallet is active again."
+      ? tr(lang, "\u26A0 حساب WTS Pay بتاعك اتجمّد من الأدمن. رصيدك سليم. تواصل مع الدعم.", "\u26A0 Your WTS Pay account has been frozen by an administrator. Your balance remains intact. Contact support.")
+      : tr(lang, "\u2705 حساب WTS Pay بتاعك اترفع عنه التجميد. محفظتك شغالة تاني.", "\u2705 Your WTS Pay account has been unfrozen. Your wallet is active again.")
   );
 }
 
-export async function notifyApproval(phone: string, wtsId: string, walletId: string, balance: number) {
+export async function notifyApproval(phone: string, wtsId: string, walletId: string, balance: number, lang: Lang = "ar") {
   const { sendButtonMessage } = await import("./whatsapp.client.js");
   const { ACTIONS } = await import("./whatsapp.templates.js");
-  await sendButtonMessage(phone.replace("+", ""), `\u{1F389} Your WTS Pay account has been approved.\nYour wallet is now active.\n\nWTS ID:\n${wtsId}\nBalance:\n${balance} EGP`, [
-    { id: ACTIONS.BALANCE, title: "\u{1F4B0} Wallet" },
-    { id: ACTIONS.SEND_MONEY, title: "\u{1F4B8} Send Money" },
-    { id: ACTIONS.CREATE_PIN, title: "\u{1F512} Create PIN" },
-  ]);
+  await sendButtonMessage(
+    phone.replace("+", ""),
+    tr(
+      lang,
+      `\u{1F389} تم قبول حساب WTS Pay بتاعك.\nمحفظتك بقت شغالة دلوقتي.\n\nكود WTS:\n${wtsId}\nالرصيد:\n${balance} جنيه`,
+      `\u{1F389} Your WTS Pay account has been approved.\nYour wallet is now active.\n\nWTS ID:\n${wtsId}\nBalance:\n${balance} EGP`
+    ),
+    [
+      { id: ACTIONS.BALANCE, title: tr(lang, "\u{1F4B0} المحفظة", "\u{1F4B0} Wallet") },
+      { id: ACTIONS.SEND_MONEY, title: tr(lang, "\u{1F4B8} تحويل فلوس", "\u{1F4B8} Send Money") },
+      { id: ACTIONS.CREATE_PIN, title: tr(lang, "\u{1F512} اعمل رقم سري", "\u{1F512} Create PIN") },
+    ]
+  );
 }
 
-export async function notifyRejection(phone: string, reason: string) {
+export async function notifyRejection(phone: string, reason: string, lang: Lang = "ar") {
   const { sendTextMessage } = await import("./whatsapp.client.js");
-  await sendTextMessage(phone.replace("+", ""), `Your WTS Pay registration was rejected. Reason: ${reason}. Contact support if you believe this is a mistake.`);
+  await sendTextMessage(
+    phone.replace("+", ""),
+    tr(lang, `طلب التسجيل في WTS Pay اترفض. السبب: ${reason}. تواصل مع الدعم لو فاكر إن ده غلط.`, `Your WTS Pay registration was rejected. Reason: ${reason}. Contact support if you believe this is a mistake.`)
+  );
 }
 
 // ── طلب تحويل: إشعارات واتساب (نصية) ────────────────────────────────────
 // الرد (قبول/رفض) ممكن يتم من الموقع أو من واتساب نفسه دلوقتي.
-export async function notifyMoneyRequest(phone: string, requesterName: string, amount: number, requestId: string) {
+export async function notifyMoneyRequest(phone: string, requesterName: string, amount: number, requestId: string, lang: Lang = "ar") {
   const { sendTextMessage } = await import("./whatsapp.client.js");
   await sendTextMessage(
     phone.replace("+", ""),
-    `\u{1F4E9} ${requesterName} is requesting ${amount} EGP from you on WTS Pay.\nOpen the app to accept or reject this request.`
+    tr(
+      lang,
+      `\u{1F4E9} ${requesterName} طالب منك ${amount} جنيه على WTS Pay.\nافتح التطبيق عشان توافق أو ترفض الطلب.`,
+      `\u{1F4E9} ${requesterName} is requesting ${amount} EGP from you on WTS Pay.\nOpen the app to accept or reject this request.`
+    )
   );
 }
 
@@ -603,36 +718,39 @@ export async function notifyTransferReceived(transactionId: string): Promise<voi
     where: { id: transactionId },
     include: {
       sender: { select: { fullName: true, username: true } },
-      receiver: { select: { whatsappPhone: true, phone: true } },
+      receiver: { select: { whatsappPhone: true, phone: true, language: true } },
     },
   });
   if (!t || !t.receiver) return;
   const to = (t.receiver.whatsappPhone ?? t.receiver.phone ?? "").replace("+", "");
   if (!to) return;
-  const senderName = t.sender?.fullName ?? t.sender?.username ?? "Someone";
+  const lang = normalizeLang((t.receiver as any).language);
+  const senderName = t.sender?.fullName ?? t.sender?.username ?? tr(lang, "حد ما", "Someone");
   const balance = t.receiverBalanceAfter;
   const { sendTextMessage } = await import("./whatsapp.client.js");
   await sendTextMessage(
     to,
-    `\u{1F4B0} You received ${t.amount.toLocaleString()} EGP from ${senderName}.` +
-      (balance !== null && balance !== undefined ? `\nNew balance: ${balance.toLocaleString()} EGP.` : "")
+    tr(
+      lang,
+      `\u{1F4B0} استلمت ${t.amount.toLocaleString()} جنيه من ${senderName}.` +
+        (balance !== null && balance !== undefined ? `\nرصيدك دلوقتي: ${balance.toLocaleString()} جنيه.` : ""),
+      `\u{1F4B0} You received ${t.amount.toLocaleString()} EGP from ${senderName}.` +
+        (balance !== null && balance !== undefined ? `\nNew balance: ${balance.toLocaleString()} EGP.` : "")
+    )
   );
 }
 
-export async function notifyRequestAccepted(phone: string, amount: number) {
+export async function notifyRequestAccepted(phone: string, amount: number, lang: Lang = "ar") {
   const { sendTextMessage } = await import("./whatsapp.client.js");
   await sendTextMessage(
     phone.replace("+", ""),
-    `\u2705 Your request for ${amount} EGP was accepted and the money has been sent to your wallet.`
+    tr(lang, `\u2705 طلبك بمبلغ ${amount} جنيه اتوافق عليه والفلوس اتبعتت لمحفظتك.`, `\u2705 Your request for ${amount} EGP was accepted and the money has been sent to your wallet.`)
   );
 }
 
-export async function notifyRequestRejected(phone: string, amount: number) {
+export async function notifyRequestRejected(phone: string, amount: number, lang: Lang = "ar") {
   const { sendTextMessage } = await import("./whatsapp.client.js");
-  await sendTextMessage(
-    phone.replace("+", ""),
-    `\u274C Your request for ${amount} EGP was rejected.`
-  );
+  await sendTextMessage(phone.replace("+", ""), tr(lang, `\u274C طلبك بمبلغ ${amount} جنيه اترفض.`, `\u274C Your request for ${amount} EGP was rejected.`));
 }
 
 export function walletLogger() {

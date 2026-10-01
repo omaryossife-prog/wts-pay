@@ -14,6 +14,7 @@ import type { Db } from "../utils/prisma.js";
 import { getSecurityConfig } from "./config.service.js";
 import { logAudit } from "./audit.service.js";
 import { logger } from "../utils/logger.js";
+import { type Lang, tr } from "../i18n/lang.js";
 
 export class PinError extends Error {
   code: "PIN_INVALID" | "PIN_LOCKED" | "PIN_NOT_SET" | "PIN_WEAK" = "PIN_INVALID";
@@ -23,14 +24,14 @@ export class PinError extends Error {
   }
 }
 
-export function validatePinFormat(pin: string): void {
+export function validatePinFormat(pin: string, lang: Lang = "ar"): void {
   if (!/^\d{6}$/.test(pin)) {
-    throw new PinError("PIN_WEAK", "PIN must be exactly 6 digits.");
+    throw new PinError("PIN_WEAK", tr(lang, "الرقم السري لازم يكون 6 أرقام بالظبط.", "PIN must be exactly 6 digits."));
   }
 }
 
-export async function setPin(db: Db, input: { userId: string; pin: string; ip?: string }) {
-  validatePinFormat(input.pin);
+export async function setPin(db: Db, input: { userId: string; pin: string; ip?: string; lang?: Lang }) {
+  validatePinFormat(input.pin, input.lang ?? "ar");
   const client: any = db;
   const hash = await bcrypt.hash(input.pin, 10);
   await client.user.update({
@@ -41,16 +42,17 @@ export async function setPin(db: Db, input: { userId: string; pin: string; ip?: 
 }
 
 // Verify a PIN with attempt limiting + temporary lockout.
-export async function verifyPin(db: Db, input: { userId: string; pin: string; ip?: string }): Promise<void> {
+export async function verifyPin(db: Db, input: { userId: string; pin: string; ip?: string; lang?: Lang }): Promise<void> {
   const client: any = db;
+  const lang = input.lang ?? "ar";
   const cfg = await getSecurityConfig(client);
   const user = await client.user.findUnique({ where: { id: input.userId } });
-  if (!user) throw new PinError("PIN_NOT_SET", "Account not found.");
-  if (!user.pinHash) throw new PinError("PIN_NOT_SET", "No PIN set. Create your PIN first.");
+  if (!user) throw new PinError("PIN_NOT_SET", tr(lang, "الحساب مش موجود.", "Account not found."));
+  if (!user.pinHash) throw new PinError("PIN_NOT_SET", tr(lang, "معملتش رقم سري لسه. اعمل الرقم السري الأول.", "No PIN set. Create your PIN first."));
 
   if (user.pinLockedUntil && new Date(user.pinLockedUntil) > new Date()) {
     const mins = Math.ceil((new Date(user.pinLockedUntil).getTime() - Date.now()) / 60000);
-    throw new PinError("PIN_LOCKED", `Too many failed attempts. Try again in ${mins} minute(s).`);
+    throw new PinError("PIN_LOCKED", tr(lang, `محاولات كتير غلط. جرّب تاني بعد ${mins} دقيقة.`, `Too many failed attempts. Try again in ${mins} minute(s).`));
   }
 
   const ok = await bcrypt.compare(input.pin, user.pinHash);
@@ -67,14 +69,14 @@ export async function verifyPin(db: Db, input: { userId: string; pin: string; ip
         detail: { attempts, lockMinutes: cfg.pinLockMinutes },
       });
       logger.warn("PIN locked due to failed attempts", { userId: user.id, ip: input.ip });
-      throw new PinError("PIN_LOCKED", `Too many failed attempts. PIN locked for ${cfg.pinLockMinutes} minutes.`);
+      throw new PinError("PIN_LOCKED", tr(lang, `محاولات كتير غلط. الرقم السري اتقفل لمدة ${cfg.pinLockMinutes} دقيقة.`, `Too many failed attempts. PIN locked for ${cfg.pinLockMinutes} minutes.`));
     }
     await client.user.update({ where: { id: user.id }, data: { pinFailedAttempts: attempts } });
     await logAudit(client, {
       userId: user.id, action: "PIN_VERIFY_FAILED", ip: input.ip,
       detail: { attempts, maxAttempts: cfg.pinMaxAttempts },
     });
-    throw new PinError("PIN_INVALID", `Incorrect PIN. ${cfg.pinMaxAttempts - attempts} attempt(s) remaining.`);
+    throw new PinError("PIN_INVALID", tr(lang, `رقم سري غلط. متبقيلك ${cfg.pinMaxAttempts - attempts} محاولة.`, `Incorrect PIN. ${cfg.pinMaxAttempts - attempts} attempt(s) remaining.`));
   }
 
   // Success: reset the counter (keep any existing lock until it passes)

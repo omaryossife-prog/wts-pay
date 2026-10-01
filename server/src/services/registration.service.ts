@@ -12,16 +12,27 @@ import type { Db } from "../utils/prisma.js";
 import { logAudit } from "./audit.service.js";
 import { getConfigJson } from "./config.service.js";
 import { generateTxReference } from "./wallet.service.js";
+import { type Lang, tr } from "../i18n/lang.js";
 
 // Four-part legal name validation, e.g. "Ahmed Mohamed Ali Hassan"
-export function validateFourPartName(raw: string): { ok: boolean; fullName?: string; error?: string } {
+export function validateFourPartName(raw: string, lang: Lang = "ar"): { ok: boolean; fullName?: string; error?: string } {
   const cleaned = raw.trim().replace(/\s+/g, " ");
   const parts = cleaned.split(" ");
   if (parts.length !== 4) {
-    return { ok: false, error: `Please enter your full four-part legal name exactly as on your ID (you entered ${parts.length} part(s)). Example: Ahmed Mohamed Ali Hassan` };
+    return {
+      ok: false,
+      error: tr(
+        lang,
+        `من فضلك اكتب اسمك الرباعي بالكامل زي ما هو مكتوب في البطاقة (انت كتبت ${parts.length} كلمة بس). مثال: أحمد محمد علي حسن`,
+        `Please enter your full four-part legal name exactly as on your ID (you entered ${parts.length} part(s)). Example: Ahmed Mohamed Ali Hassan`
+      ),
+    };
   }
   if (!parts.every((p) => /^[\p{L}.'-]{2,}$/u.test(p))) {
-    return { ok: false, error: "Name parts may only contain letters, dots, apostrophes or hyphens." };
+    return {
+      ok: false,
+      error: tr(lang, "كل جزء من الاسم لازم يكون حروف بس (ممكن نقطة أو فاصلة علوية أو شرطة).", "Name parts may only contain letters, dots, apostrophes or hyphens."),
+    };
   }
   return { ok: true, fullName: cleaned };
 }
@@ -41,7 +52,10 @@ export async function findByWhatsAppIdentity(db: Db, waId: string, phoneDigits: 
 }
 
 // Create the pre-verification record on "Create Account".
-export async function createRegistration(db: Db, input: { waId: string; phoneDigits: string; profileName?: string }) {
+export async function createRegistration(
+  db: Db,
+  input: { waId: string; phoneDigits: string; profileName?: string; language?: Lang }
+) {
   const client: any = db;
   const phone = normalizeWaPhone(input.phoneDigits);
   const existing = await findByWhatsAppIdentity(client, input.waId, input.phoneDigits);
@@ -57,6 +71,7 @@ export async function createRegistration(db: Db, input: { waId: string; phoneDig
       whatsappPhone: phone,
       verificationStatus: "UNVERIFIED",
       demoBalance: 0,
+      language: input.language ?? "ar",
     },
   });
 }

@@ -81,6 +81,9 @@ model User {
   role          Role          @default(USER)
   status        AccountStatus @default(ACTIVE)
   demoBalance   Int           @default(0)
+  // ---- Language preference (website + WhatsApp) ----
+  // "ar" = Arabic (Egyptian), "en" = English. Existing users default to "ar".
+  language      String        @default("ar")
 
   // ---- Permanent WTS identity (never the WhatsApp display name) ----
   wtsId         String?       @unique // WTS-000123 (issued at admin approval)
