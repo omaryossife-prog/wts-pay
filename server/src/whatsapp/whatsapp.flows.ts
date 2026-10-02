@@ -18,8 +18,12 @@
 import crypto from "crypto";
 import { prisma } from "../utils/prisma.js";
 import { logger } from "../utils/logger.js";
-import { completePinFromFlow } from "./whatsapp.service.js";
+import { completePinFromFlow, SessionState, setSession } from "./whatsapp.service.js";
 import { validatePinFormat } from "../services/pin.service.js";
+import {
+  recordGender, recordGovernorate, recordNationalId, validateNationalId, RegDetailsError,
+} from "../services/registration.service.js";
+import { governorateByCode } from "../services/governorates.js";
 import { executeWtsAction, notifyWtsActionResult, WTS_FLOW_ACTIONS, type WtsActionResponse } from "./whatsapp.actions.js";
 import { type Lang, tr, normalizeLang } from "../i18n/lang.js";
 
@@ -144,6 +148,88 @@ export async function handleFlowDataExchange(body: any): Promise<any> {
   } catch (err: any) {
     return encryptFlowResponse(aesKey, iv, version, "PIN", { message: err.message ?? tr(lang, "رقم سري غير صالح", "Invalid PIN") });
   }
+}
+
+// ── Registration-details Flow (gender / governorate / national ID) ──
+// Sent right after the registration SMS-OTP step succeeds. ID photos are
+// NOT part of this Flow (still requested as normal chat images right after
+// it closes) — see server/flows/wts-registration-details.flow.json and the
+// README section on bilingual/registration for why.
+export async function sendRegDetailsFlow(to: string, userId: string): Promise<boolean> {
+  const flowId = process.env.WHATSAPP_REG_DETAILS_FLOW_ID;
+  if (!flowId) return false;
+  const lang = await langFor(userId);
+  const { sendInteractiveMessage } = await import("./whatsapp.client.js");
+  const { flowMessagePayload } = await import("./whatsapp.templates.js");
+  const r = await sendInteractiveMessage(
+    flowMessagePayload(
+      to,
+      flowId,
+      userId,
+      tr(lang, "كمّل بيانات التسجيل: الجنس، المحافظة، والرقم القومي.", "Complete your registration details: gender, governorate, and national ID."),
+      tr(lang, "\u{1F4DD} كمّل البيانات", "\u{1F4DD} Continue")
+    )
+  );
+  return r.ok;
+}
+
+// POST /api/whatsapp/flows/registration-details
+export async function handleRegDetailsFlowDataExchange(body: any): Promise<any> {
+  if (body?.action === "ping") return { status: "active", data: {} };
+  const parsed = decryptFlowBody(body);
+  if (!parsed) return { status: "failed", data: { message: "Flow endpoint not configured" } };
+  const { flowData, aesKey, iv } = parsed;
+  if (flowData?.action === "ping") return { status: "active", data: {} };
+
+  const version = flowData?.version ?? "7.2";
+  const screen = String(flowData?.screen ?? "DETAILS");
+  const data = flowData?.data ?? {};
+  const userId = String(flowData?.flow_token ?? "");
+  const send = (screenName: string, screenData: Record<string, unknown>) => encryptFlowResponse(aesKey, iv, version, screenName, screenData);
+  const lang = userId ? await langFor(userId) : "ar";
+
+  if (!userId) return send("DETAILS", { error: tr(lang, "تعذر التحقق من هوية المستخدم.", "Could not verify your identity.") });
+
+  if (screen === "DETAILS" && (flowData?.action === "INIT" || data.op === "submit_details")) {
+    if (flowData?.action === "INIT") {
+      return send("DETAILS", { error: "" });
+    }
+    const gender = String(data.gender ?? "");
+    const governorateCode = String(data.governorate ?? "");
+    const rawNationalId = String(data.national_id ?? "");
+
+    if (gender !== "male" && gender !== "female") {
+      return send("DETAILS", { error: tr(lang, "اختار النوع.", "Please choose a gender.") });
+    }
+    if (!governorateByCode(governorateCode)) {
+      return send("DETAILS", { error: tr(lang, "اختار المحافظة.", "Please choose a governorate.") });
+    }
+    const idCheck = validateNationalId(rawNationalId, lang);
+    if (!idCheck.ok) {
+      return send("DETAILS", { error: idCheck.error });
+    }
+
+    try {
+      await recordGender(prisma, userId, gender as "male" | "female");
+      await recordGovernorate(prisma, userId, governorateCode);
+      await recordNationalId(prisma, userId, idCheck.digits, lang);
+    } catch (err: any) {
+      const msg = err instanceof RegDetailsError ? err.message : tr(lang, "حصل خطأ، جرّب تاني.", "Something went wrong, please try again.");
+      return send("DETAILS", { error: msg });
+    }
+
+    // التالي في المحادثة العادية: صورة وش البطاقة (مش جوه الفورم ده).
+    await setSession(userId, SessionState.REG_ID_FRONT, {});
+    return send("DONE", {
+      message: tr(
+        lang,
+        "تم حفظ بياناتك. ارجع للمحادثة وابعت صورة واضحة لوش البطاقة الشخصية.",
+        "Your details were saved. Go back to the chat and send a clear photo of the front of your ID card."
+      ),
+    });
+  }
+
+  return send("DETAILS", { error: tr(lang, "مسار غير معروف.", "Unknown step.") });
 }
 
 // ── Send Money Flow — data collection ONLY. Ends by triggering the

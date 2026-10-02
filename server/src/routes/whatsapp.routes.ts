@@ -6,6 +6,7 @@ import {
   handleSendMoneyFlowDataExchange,
   handleConfirmPinFlowDataExchange,
   handleWalletFlowDataExchange,
+  handleRegDetailsFlowDataExchange,
 } from "../whatsapp/whatsapp.flows.js";
 
 const router = Router();
@@ -32,6 +33,10 @@ router.post("/flows/:name", async (req: Request, res: Response) => {
   }
   if (name === "confirm-pin") {
     const result = await handleConfirmPinFlowDataExchange(req.body);
+    return res.json(result);
+  }
+  if (name === "registration-details") {
+    const result = await handleRegDetailsFlowDataExchange(req.body);
     return res.json(result);
   }
   return res.status(404).json({ error: "Unknown flow" });

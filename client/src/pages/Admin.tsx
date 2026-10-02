@@ -72,8 +72,9 @@ function Verifications() {
     <div className="card">
       <h2>Pending Verification</h2>
       <p className="muted" style={{ marginBottom: 12 }}>
-        Media policy: ID photos and face videos are <strong>not</strong> stored in WTS.
-        Open the WhatsApp conversation to review the actual media, then approve or reject.
+        Media policy: ID photos and face videos are <strong>never</strong> stored in WTS databases.
+        Open the WhatsApp conversation to review ID photos and the face video directly, then approve or reject.
+        Registration details (name, gender, governorate, last 6 digits of national ID) are shown below.
       </p>
       {msg && <div className="notice">{msg}</div>}
       {items.length === 0 ? <p className="muted">No pending registrations.</p> :
@@ -83,8 +84,11 @@ function Verifications() {
             <div className="meta">
               WhatsApp: {u.whatsappPhone ?? "-"}<br />
               WTS ID: {u.wtsId ?? "pending (issued at approval)"}<br />
-              ID: {u.idSubmitted ? `Submitted ${u.idReceivedAt ? new Date(u.idReceivedAt).toLocaleString() : ""}` : "Missing"}<br />
-              Face video: {u.faceVideoSubmitted ? "Submitted" : "Missing"}<br />
+              Gender: {u.gender === "male" ? "Male" : u.gender === "female" ? "Female" : "—"}<br />
+              Governorate: {u.governorate ?? "—"}<br />
+              National ID (last 6): {u.nationalIdLast6 ?? "—"}<br />
+              ID photos: {u.idSubmitted ? `✅ Submitted ${u.idReceivedAt ? new Date(u.idReceivedAt).toLocaleString() : ""}` : "⏳ Pending"}<br />
+              Face video: {u.faceVideoSubmitted ? "✅ Submitted" : "⏳ Pending"}<br />
               Status: <span className="badge amber">Pending Review</span>
             </div>
             <div className="row" style={{ marginTop: 10 }}>
@@ -176,6 +180,9 @@ function Users() {
         {!selected ? <p className="muted">Select a user.</p> : !detail ? <p className="muted">Loading…</p> : (
           <>
             <div className="list-row"><span>Full name</span><strong>{detail.user.fullName ?? "-"}</strong></div>
+            <div className="list-row"><span>Gender</span><strong>{detail.user.gender === "male" ? "Male" : detail.user.gender === "female" ? "Female" : "—"}</strong></div>
+            <div className="list-row"><span>Governorate</span><strong>{detail.user.governorate ?? "—"}</strong></div>
+            <div className="list-row"><span>National ID (last 6)</span><strong>{detail.user.nationalIdLast6 ?? "—"}</strong></div>
             <div className="list-row"><span>WTS ID / Wallet</span><strong>{detail.user.wtsId ?? "-"} / {detail.user.walletId ?? "-"}</strong></div>
             <div className="list-row"><span>Phone</span><strong>{detail.user.phone}</strong></div>
             <div className="list-row"><span>WhatsApp</span><strong>{detail.user.whatsappPhone ?? "-"}</strong></div>

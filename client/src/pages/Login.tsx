@@ -5,7 +5,7 @@ import { useLang } from "../i18n/LanguageContext";
 
 export default function Login() {
   const { login } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const nav = useNavigate();
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -42,6 +42,9 @@ export default function Login() {
           </div>
           <button className="btn" disabled={busy}>{busy ? t.login.submitting : t.login.submit}</button>
         </form>
+        <p className="muted" style={{ textAlign: "center", marginTop: 10 }}>
+          <Link to="/forgot-password">{lang === "ar" ? "نسيت كلمة السر؟" : "Forgot password?"}</Link>
+        </p>
       </div>
       <p className="muted" style={{ textAlign: "center" }}>
         {t.login.noAccount} <Link to="/register">{t.login.registerLink}</Link>

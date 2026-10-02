@@ -96,6 +96,25 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  // forgot password: phone + last 6 digits of national ID -> SMS OTP -> new password
+  sendResetCode: (phone: string, nationalIdLast6: string) =>
+    request<{ ok: boolean; expiresInSeconds: number; resendAfterSeconds: number }>(
+      "/api/auth/reset/send",
+      { method: "POST", body: JSON.stringify({ phone, nationalIdLast6 }) }
+    ),
+
+  verifyResetCode: (phone: string, code: string) =>
+    request<{ resetToken: string; expiresInSeconds: number }>(
+      "/api/auth/reset/verify",
+      { method: "POST", body: JSON.stringify({ phone, code }) }
+    ),
+
+  completeReset: (phone: string, resetToken: string, newPassword: string) =>
+    request<{ ok: boolean }>(
+      "/api/auth/reset/complete",
+      { method: "POST", body: JSON.stringify({ phone, resetToken, newPassword }) }
+    ),
+
   logout: () =>
     request("/api/auth/logout", {
       method: "POST",

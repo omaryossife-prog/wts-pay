@@ -15,14 +15,16 @@ import { prisma } from "../utils/prisma.js";
 import { logger } from "../utils/logger.js";
 import { sendTextMessage, sendButtonMessage, sendListMessage, markAsRead } from "./whatsapp.client.js";
 import {
-  ACTIONS, mainMenuRows, greetingText, startButton, numberNoText,
+  ACTIONS, mainMenuRows, greetingText, startButton,
   LANGUAGE_PROMPT_TEXT, LANGUAGE_BUTTONS, languageSavedText,
 } from "./whatsapp.templates.js";
-import { sendPinFlow, sendSendMoneyFlow, sendConfirmPinFlow, sendWalletFlow } from "./whatsapp.flows.js";
+import { sendPinFlow, sendSendMoneyFlow, sendConfirmPinFlow, sendWalletFlow, sendRegDetailsFlow } from "./whatsapp.flows.js";
 import {
   SessionState, getUserByWaIdentity, getSession, setSession,
   maintenanceActive, getUserLanguage, setUserLanguage,
-  startRegistration, handleNameInput, confirmNumberYes,
+  startRegistration, handleNameInput,
+  handleRegistrationOtpInput, handleRegistrationOtpResend,
+  handleGenderButton, handleGovernorateInput, handleNationalIdInput,
   handleIdFront, handleIdBack, handleFaceVideo,
   handlePinCreateInput, handlePinConfirmInput,
   getBalanceText, getTransactionsText, getReferralText, getAccountText, helpText,
@@ -187,27 +189,46 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
     switch (session.state) {
       case SessionState.REG_NAME: {
         const r = await handleNameInput(user.id, text, lang);
-        if (r.ok) {
-          await sendButtonMessage(to, r.text, [
-            { id: ACTIONS.YES, title: tr(lang, "\u2705 آه", "\u2705 Yes") },
-            { id: ACTIONS.NO, title: tr(lang, "\u274C لأ", "\u274C No") },
-          ]);
+        // handleNameInput ينجح ببعت كود SMS فورًا ويحط الجلسة على
+        // REG_PHONE_OTP (ده إثبات الشريحة الفعلي — مش زرار "آه/لأ").
+        await sendTextMessage(to, r.text);
+        return;
+      }
+      case SessionState.REG_PHONE_OTP: {
+        if (["resend", "إعادة إرسال", "اعادة ارسال", "إعاده إرسال"].includes(lowerText)) {
+          await sendTextMessage(to, await handleRegistrationOtpResend(user.id, lang));
+          return;
+        }
+        const r = await handleRegistrationOtpInput(user.id, text, lang);
+        await sendTextMessage(to, r.text);
+        return;
+      }
+      case SessionState.REG_DETAILS_FLOW: {
+        // البيانات (الجنس/المحافظة/الرقم القومي) بتتجمّع جوه الفورم اللي
+        // فوق، مش من هنا — أي رسالة نصية هنا تبقى تذكير بس.
+        await sendTextMessage(to, tr(lang, "كمّل بياناتك في الفورم اللي فوق عشان نقدر نكمّل التسجيل.", "Please continue filling in the form above to proceed with registration."));
+        return;
+      }
+      case SessionState.REG_GENDER: {
+        if (replyId === "gender_male" || replyId === "gender_female") {
+          const choice = replyId === "gender_male" ? "male" : "female";
+          await sendTextMessage(to, await handleGenderButton(user.id, choice, lang));
         } else {
-          await sendTextMessage(to, r.text);
+          await sendButtonMessage(to, tr(lang, "النوع؟", "Gender?"), [
+            { id: "gender_male", title: tr(lang, "ذكر", "Male") },
+            { id: "gender_female", title: tr(lang, "أنثى", "Female") },
+          ]);
         }
         return;
       }
-      case SessionState.REG_CONFIRM_NUMBER: {
-        if (replyId === ACTIONS.YES) {
-          await sendTextMessage(to, await confirmNumberYes(user.id, lang));
-        } else if (replyId === ACTIONS.NO) {
-          await sendTextMessage(to, numberNoText(lang));
-        } else {
-          await sendButtonMessage(to, tr(lang, "ده رقم الواتساب بتاعك؟", "Is this your WhatsApp number?"), [
-            { id: ACTIONS.YES, title: tr(lang, "\u2705 آه", "\u2705 Yes") },
-            { id: ACTIONS.NO, title: tr(lang, "\u274C لأ", "\u274C No") },
-          ]);
-        }
+      case SessionState.REG_GOVERNORATE: {
+        const r = await handleGovernorateInput(user.id, text, lang);
+        await sendTextMessage(to, r.text);
+        return;
+      }
+      case SessionState.REG_NATIONAL_ID: {
+        const r = await handleNationalIdInput(user.id, text, lang);
+        await sendTextMessage(to, r.text);
         return;
       }
       case SessionState.REG_ID_FRONT: {

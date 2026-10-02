@@ -122,8 +122,17 @@ model User {
   referralCount Int           @default(0)
   totalEarned   Int           @default(0)
 
-  // Sensitive identity fields (encrypt at application level before storing)
-  nationalIdEnc String?
+  // ---- Registration details (collected via the registration-details Flow,
+  // or its chat fallback, right after phone OTP verification) ----
+  gender         String?   // "male" | "female"
+  governorate    String?   // governorate code, see server/src/services/governorates.ts
+  // Sensitive identity fields: nationalIdEnc stores an HMAC-SHA256 hash only
+  // (never the plain number or a reversible encryption) — used to block
+  // duplicate registrations with the same ID. nationalIdLast6 stores just the
+  // last 6 digits in the clear, used only to verify identity for "forgot
+  // password" (phone + last 6 digits + a fresh SMS OTP).
+  nationalIdEnc    String?   @unique
+  nationalIdLast6  String?
 
   // WhatsApp conversation state
   whatsappUserId           String?

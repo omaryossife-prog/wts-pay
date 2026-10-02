@@ -1,0 +1,231 @@
+{
+  "version": "7.2",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "DETAILS": [
+      "DONE"
+    ],
+    "DONE": []
+  },
+  "screens": [
+    {
+      "id": "DETAILS",
+      "title": "بيانات التسجيل",
+      "terminal": false,
+      "data": {
+        "error": {
+          "type": "string",
+          "__example__": ""
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "f",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "بيانات التسجيل"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.error}"
+              },
+              {
+                "type": "TextBody",
+                "text": "اختار بياناتك زي ما هي مكتوبة في البطاقة الشخصية."
+              },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "gender",
+                "label": "النوع",
+                "required": true,
+                "data-source": [
+                  {
+                    "id": "male",
+                    "title": "ذكر"
+                  },
+                  {
+                    "id": "female",
+                    "title": "أنثى"
+                  }
+                ]
+              },
+              {
+                "type": "Dropdown",
+                "name": "governorate",
+                "label": "المحافظة",
+                "required": true,
+                "data-source": [
+                  {
+                    "id": "CAI",
+                    "title": "القاهرة"
+                  },
+                  {
+                    "id": "GIZ",
+                    "title": "الجيزة"
+                  },
+                  {
+                    "id": "QLY",
+                    "title": "القليوبية"
+                  },
+                  {
+                    "id": "ALX",
+                    "title": "الإسكندرية"
+                  },
+                  {
+                    "id": "BEH",
+                    "title": "البحيرة"
+                  },
+                  {
+                    "id": "KFS",
+                    "title": "كفر الشيخ"
+                  },
+                  {
+                    "id": "DAK",
+                    "title": "الدقهلية"
+                  },
+                  {
+                    "id": "DAM",
+                    "title": "دمياط"
+                  },
+                  {
+                    "id": "SHR",
+                    "title": "الشرقية"
+                  },
+                  {
+                    "id": "GHR",
+                    "title": "الغربية"
+                  },
+                  {
+                    "id": "MNF",
+                    "title": "المنوفية"
+                  },
+                  {
+                    "id": "PTS",
+                    "title": "بورسعيد"
+                  },
+                  {
+                    "id": "ISM",
+                    "title": "الإسماعيلية"
+                  },
+                  {
+                    "id": "SUZ",
+                    "title": "السويس"
+                  },
+                  {
+                    "id": "NSI",
+                    "title": "شمال سيناء"
+                  },
+                  {
+                    "id": "SSI",
+                    "title": "جنوب سيناء"
+                  },
+                  {
+                    "id": "BNS",
+                    "title": "بني سويف"
+                  },
+                  {
+                    "id": "FYM",
+                    "title": "الفيوم"
+                  },
+                  {
+                    "id": "MNY",
+                    "title": "المنيا"
+                  },
+                  {
+                    "id": "AST",
+                    "title": "أسيوط"
+                  },
+                  {
+                    "id": "SHG",
+                    "title": "سوهاج"
+                  },
+                  {
+                    "id": "QNA",
+                    "title": "قنا"
+                  },
+                  {
+                    "id": "LXR",
+                    "title": "الأقصر"
+                  },
+                  {
+                    "id": "ASN",
+                    "title": "أسوان"
+                  },
+                  {
+                    "id": "RSA",
+                    "title": "البحر الأحمر"
+                  },
+                  {
+                    "id": "WAD",
+                    "title": "الوادي الجديد"
+                  },
+                  {
+                    "id": "MAT",
+                    "title": "مطروح"
+                  }
+                ]
+              },
+              {
+                "type": "TextInput",
+                "name": "national_id",
+                "label": "الرقم القومي",
+                "input-type": "number",
+                "required": true,
+                "helper-text": "14 رقم زي ما هو مكتوب في البطاقة"
+              },
+              {
+                "type": "Footer",
+                "label": "متابعة",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "op": "submit_details",
+                    "gender": "${form.gender}",
+                    "governorate": "${form.governorate}",
+                    "national_id": "${form.national_id}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "DONE",
+      "title": "تم",
+      "terminal": true,
+      "data": {
+        "message": {
+          "type": "string",
+          "__example__": "تم حفظ بياناتك."
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "✅ تم"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.message}"
+          },
+          {
+            "type": "Footer",
+            "label": "إغلاق",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

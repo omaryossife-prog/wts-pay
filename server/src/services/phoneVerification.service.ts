@@ -33,7 +33,8 @@ export type PhoneVerificationErrorCode =
   | "CODE_EXPIRED"
   | "TOO_MANY_ATTEMPTS"
   | "INVALID_CODE"
-  | "PHONE_NOT_VERIFIED";
+  | "PHONE_NOT_VERIFIED"
+  | "IDENTITY_MISMATCH";
 
 export class PhoneVerificationError extends Error {
   code: PhoneVerificationErrorCode;
@@ -96,6 +97,10 @@ export interface SendCodeInput {
   ip?: string;
   now?: number;
   sender?: SmsSender; // للاختبارات
+  // لو ده رقم مستخدم واتساب لسه بيكمّل تسجيله (الصف اتعمل أول ما دوس "ابدأ"،
+  // قبل ما يوصل لخطوة الـ OTP) — مسموح نبعت كود حتى لو الصف موجود، طالما
+  // نفس المستخدم ده بالظبط.
+  allowUserId?: string;
 }
 
 export async function sendPhoneCode(db: Db, input: SendCodeInput) {
@@ -105,9 +110,10 @@ export async function sendPhoneCode(db: Db, input: SendCodeInput) {
   const phone = normalizeInternationalPhone(input.phone);
   const today = dayKey(now);
 
-  // لو الرقم مسجل قبل كده: مفيش SMS أصلًا
+  // لو الرقم مسجل قبل كده: مفيش SMS أصلًا — إلا لو ده نفس صف تسجيل
+  // الواتساب الجاري استكماله دلوقتي (allowUserId).
   const existing = await client.user.findUnique({ where: { phone } });
-  if (existing) {
+  if (existing && existing.id !== input.allowUserId) {
     throw new PhoneVerificationError("PHONE_TAKEN", "في حساب مسجل بالرقم ده بالفعل.");
   }
 
@@ -165,6 +171,108 @@ export async function sendPhoneCode(db: Db, input: SendCodeInput) {
   }
 
   return { ok: true, phone, expiresInSeconds: OTP_TTL_MS / 1000, resendAfterSeconds: OTP_RESEND_COOLDOWN_MS / 1000 };
+}
+
+// ---------------------------------------------------------------------------
+// Forgot password: phone + last 6 digits of the national ID (collected at
+// registration) proves identity, then the SAME SMS-OTP code/verify machinery
+// above is reused (same Config key namespace "phoneotp:<phone>") — only the
+// existence check is inverted: here the user MUST already exist and match.
+// ---------------------------------------------------------------------------
+export interface SendResetCodeInput {
+  phone: string;
+  nationalIdLast6: string;
+  ip?: string;
+  now?: number;
+  sender?: SmsSender;
+}
+
+export async function sendPasswordResetCode(db: Db, input: SendResetCodeInput) {
+  const client: any = db;
+  const now = input.now ?? Date.now();
+  const sender = input.sender ?? sendSms;
+  const phone = normalizeInternationalPhone(input.phone);
+  const today = dayKey(now);
+  const last6 = input.nationalIdLast6.replace(/\D/g, "");
+
+  const user = await client.user.findUnique({ where: { phone } });
+  if (!user || !user.nationalIdLast6 || last6.length !== 6 || user.nationalIdLast6 !== last6) {
+    // رسالة عامة ومتعمّدة إنها متطابقة لحالة عدم التطابق بأي شكل (رقم
+    // مش موجود، أو آخر 6 أرقام غلط) — عشان محدش يقدر يتأكد هل رقم موجود
+    // في النظام من غير ما يعرف آخر 6 أرقام صح.
+    throw new PhoneVerificationError("IDENTITY_MISMATCH", "البيانات دي مش متطابقة مع أي حساب عندنا.");
+  }
+
+  const ipKey = input.ip ? `phoneotp-ip:${input.ip}` : null;
+  let ipState: IpState | null = null;
+  if (ipKey) {
+    ipState = await getConfigRow<IpState>(client, ipKey);
+    if (!ipState || ipState.day !== today) ipState = { day: today, count: 0 };
+    if (ipState.count >= OTP_MAX_SENDS_PER_IP_PER_DAY) {
+      throw new PhoneVerificationError("IP_LIMIT", "تم تجاوز الحد اليومي للطلبات. جرّب بكرة.");
+    }
+  }
+
+  const key = `phoneotp:${phone}`;
+  const prev = await getConfigRow<OtpState>(client, key);
+  const sameDay = prev && prev.day === today;
+
+  if (prev) {
+    const waitMs = prev.lastSentAt + OTP_RESEND_COOLDOWN_MS - now;
+    if (waitMs > 0) {
+      const secs = Math.ceil(waitMs / 1000);
+      throw new PhoneVerificationError("COOLDOWN", `استنى ${secs} ثانية قبل طلب كود جديد.`, secs);
+    }
+    if (sameDay && prev.sentToday >= OTP_MAX_SENDS_PER_DAY) {
+      throw new PhoneVerificationError("DAILY_LIMIT", "وصلت للحد الأقصى من الرسائل النهارده لهذا الرقم. جرّب بكرة.");
+    }
+  }
+
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+  const next: OtpState = {
+    codeHash: hashCode(phone, code),
+    expiresAt: now + OTP_TTL_MS,
+    attempts: 0,
+    lastSentAt: now,
+    day: today,
+    sentToday: (sameDay ? prev!.sentToday : 0) + 1,
+  };
+
+  await putConfigRow(client, key, next);
+  if (ipKey && ipState) await putConfigRow(client, ipKey, { ...ipState, count: ipState.count + 1 });
+
+  try {
+    await sender(phone, `كود استعادة كلمة السر في WTS Pay هو: ${code}\nصالح لمدة 5 دقائق. لا تشاركه مع أي شخص.`);
+  } catch (err) {
+    if (prev) await putConfigRow(client, key, prev);
+    else await putConfigRow(client, key, { ...next, codeHash: null, sentToday: 0, lastSentAt: 0 });
+    if (ipKey && ipState) await putConfigRow(client, ipKey, ipState);
+    if (err instanceof SmsSendError) {
+      throw new PhoneVerificationError("SMS_UNAVAILABLE", "مش قادرين نبعت الرسالة دلوقتي. جرّب بعد شوية.");
+    }
+    throw err;
+  }
+
+  return { ok: true, phone, expiresInSeconds: OTP_TTL_MS / 1000, resendAfterSeconds: OTP_RESEND_COOLDOWN_MS / 1000 };
+}
+
+// مفتاح JWT منفصل بالـ purpose "password-reset" — مش نفس phoneToken بتاع
+// التسجيل، عشان التوكنين مايتبادلوش استخدام مع بعض.
+export function issueResetToken(phone: string): string {
+  return jwt.sign({ purpose: "password-reset", phone }, phoneTokenSecret(), { expiresIn: PHONE_TOKEN_TTL_SECONDS });
+}
+
+export function assertResetToken(token: string | undefined, phone: string) {
+  const fail = () => new PhoneVerificationError("PHONE_NOT_VERIFIED", "لازم تتحقق من الرقم وآخر 6 أرقام من البطاقة الأول.");
+  if (!token) throw fail();
+  let payload: any;
+  try {
+    payload = jwt.verify(token, phoneTokenSecret());
+  } catch {
+    throw fail();
+  }
+  const normalized = phone.replace(/[\s\-()]/g, "");
+  if (payload?.purpose !== "password-reset" || payload?.phone !== normalized) throw fail();
 }
 
 export async function verifyPhoneCode(db: Db, input: { phone: string; code: string; now?: number }) {

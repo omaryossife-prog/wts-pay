@@ -1,9 +1,13 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
 import { prisma } from "../utils/prisma.js";
 import { register, login } from "../services/user.service.js";
 import { signToken } from "../utils/jwt.js";
-import { sendPhoneCode, verifyPhoneCode, assertPhoneToken } from "../services/phoneVerification.service.js";
+import {
+  sendPhoneCode, verifyPhoneCode, assertPhoneToken,
+  sendPasswordResetCode, issueResetToken, assertResetToken,
+} from "../services/phoneVerification.service.js";
 
 export const registerSchema = z.object({
   phone: z.string().min(8).max(20),
@@ -28,6 +32,23 @@ export const verifyPhoneCodeSchema = z.object({
 export const loginSchema = z.object({
   phone: z.string().min(8).max(20),
   password: z.string().min(1),
+});
+
+// ---- نسيان كلمة السر: رقم الموبايل + آخر 6 أرقام من الرقم القومي ----
+export const sendResetCodeSchema = z.object({
+  phone: z.string().min(8).max(20),
+  nationalIdLast6: z.string().regex(/^[0-9]{6}$/, "لازم 6 أرقام بالظبط."),
+});
+
+export const verifyResetCodeSchema = z.object({
+  phone: z.string().min(8).max(20),
+  code: z.string().regex(/^[0-9]{6}$/, "الكود لازم يكون 6 أرقام."),
+});
+
+export const completeResetSchema = z.object({
+  phone: z.string().min(8).max(20),
+  resetToken: z.string().min(10),
+  newPassword: z.string().min(8).max(100),
 });
 
 export async function sendPhoneCodeController(req: Request, res: Response) {
@@ -71,4 +92,30 @@ export async function loginController(req: Request, res: Response) {
 export function logoutController(_req: Request, res: Response) {
   res.clearCookie("wts_token");
   res.json({ ok: true });
+}
+
+export async function sendResetCodeController(req: Request, res: Response) {
+  const ip = (req.headers["cf-connecting-ip"] as string | undefined) ?? req.ip;
+  const result = await sendPasswordResetCode(prisma, {
+    phone: req.body.phone,
+    nationalIdLast6: req.body.nationalIdLast6,
+    ip,
+  });
+  res.json(result);
+}
+
+export async function verifyResetCodeController(req: Request, res: Response) {
+  // بيستخدم نفس آلية verifyPhoneCode (نفس الكود المُرسل)، وبعدين بيصدر
+  // resetToken منفصل بالـ purpose "password-reset" (مش نفس phoneToken التسجيل).
+  await verifyPhoneCode(prisma, { phone: req.body.phone, code: req.body.code });
+  const resetToken = issueResetToken(req.body.phone);
+  res.json({ resetToken, expiresInSeconds: 15 * 60 });
+}
+
+export async function completeResetController(req: Request, res: Response) {
+  assertResetToken(req.body.resetToken, req.body.phone);
+  const phone = String(req.body.phone).replace(/[\s\-()]/g, "");
+  const passwordHash = await bcrypt.hash(req.body.newPassword, 10);
+  const user = await prisma.user.update({ where: { phone }, data: { passwordHash } });
+  res.json({ ok: true, phone: user.phone });
 }

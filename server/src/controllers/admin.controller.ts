@@ -152,6 +152,7 @@ export async function userProfileController(req: Request, res: Response) {
       faceVideoReceivedAt: true, rejectionReason: true, reviewedAt: true,
       pinFailedAttempts: true, pinLockedUntil: true, transfersEnabled: true,
       pinHash: true, fraudReportCount: true, frozenUntil: true, banned: true,
+      gender: true, governorate: true, nationalIdLast6: true,
     },
   });
   if (!user) return res.status(404).json({ error: "User not found" });

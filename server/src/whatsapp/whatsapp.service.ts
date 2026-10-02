@@ -29,7 +29,11 @@ import type { WaListSectionRow } from "./whatsapp.templates.js";
 import {
   validateFourPartName, findByWhatsAppIdentity, createRegistration, recordFullName,
   recordIdSubmitted, recordFaceVideoSubmitted, normalizeWaPhone,
+  validateGender, validateGovernorateInput, validateNationalId,
+  recordGender, recordGovernorate, recordNationalId, RegDetailsError,
 } from "../services/registration.service.js";
+import { sendPhoneCode, verifyPhoneCode, PhoneVerificationError } from "../services/phoneVerification.service.js";
+import { governoratesNumberedList } from "../services/governorates.js";
 import { logger } from "../utils/logger.js";
 import type { Db } from "../utils/prisma.js";
 import { type Lang, tr, normalizeLang } from "../i18n/lang.js";
@@ -40,7 +44,14 @@ export const SessionState = {
   IDLE: "IDLE",
   // registration
   REG_NAME: "REG_NAME",
-  REG_CONFIRM_NUMBER: "REG_CONFIRM_NUMBER",
+  REG_PHONE_OTP: "REG_PHONE_OTP",
+  // Registration-details (gender/governorate/national ID): the Flow is
+  // primary (WHATSAPP_REG_DETAILS_FLOW_ID); REG_GENDER/REG_GOVERNORATE/
+  // REG_NATIONAL_ID are the documented chat fallback when it isn't configured.
+  REG_DETAILS_FLOW: "REG_DETAILS_FLOW",
+  REG_GENDER: "REG_GENDER",
+  REG_GOVERNORATE: "REG_GOVERNORATE",
+  REG_NATIONAL_ID: "REG_NATIONAL_ID",
   REG_ID_FRONT: "REG_ID_FRONT",
   REG_ID_BACK: "REG_ID_BACK",
   REG_FACE_VIDEO: "REG_FACE_VIDEO",
@@ -133,33 +144,110 @@ export async function startRegistration(waId: string, phoneDigits: string, profi
 export async function handleNameInput(userId: string, raw: string, lang: Lang = "ar"): Promise<{ text: string; ok: boolean }> {
   const v = validateFourPartName(raw, lang);
   if (!v.ok || !v.fullName) return { text: v.error ?? tr(lang, "الاسم غير صحيح.", "Invalid name."), ok: false };
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { whatsappPhone: true } });
   await recordFullName(prisma, userId, v.fullName);
-  await setSession(userId, SessionState.REG_CONFIRM_NUMBER, {});
+  // بعد الاسم مباشرة: تحقّق من رقم الواتساب نفسه برسالة SMS — ده اللي
+  // بيثبت فعلًا إن الشريحة الفعلية معاه (مش مجرد جلسة واتساب مفتوحة على
+  // رقم قديم/مزيّف)، بخلاف سؤال "ده رقمك؟" اللي كان بيتجاوب بـ "آه" بس.
+  const sent = await sendRegistrationOtp(userId, lang);
+  return { text: sent.text, ok: true };
+}
+
+// بيبعت كود SMS لرقم المستخدم (نفس نظام SMSGate المستخدم في تسجيل الموقع)
+// ويضبط الجلسة على استنى الكود. مُصدَّرة لوحدها عشان تُستخدم من "إعادة الإرسال" برضو.
+async function sendRegistrationOtp(userId: string, lang: Lang): Promise<{ text: string }> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { whatsappPhone: true } });
+  const phone = user?.whatsappPhone ?? "";
+  try {
+    await sendPhoneCode(prisma, { phone, allowUserId: userId });
+    await setSession(userId, SessionState.REG_PHONE_OTP, {});
+    return {
+      text: tr(
+        lang,
+        `\u{1F4F2} بعتنا كود تحقّق من 6 أرقام برسالة SMS لرقم ${phone}.\nاكتب الكود هنا. لو مجاش، اكتب *إعادة إرسال* بعد شوية.`,
+        `\u{1F4F2} We sent a 6-digit verification code by SMS to ${phone}.\nType the code here. If it doesn't arrive, type *resend* after a bit.`
+      ),
+    };
+  } catch (err: any) {
+    if (err instanceof PhoneVerificationError && err.code === "COOLDOWN") {
+      await setSession(userId, SessionState.REG_PHONE_OTP, {});
+      return { text: tr(lang, `استنى ${err.retryAfterSeconds ?? 45} ثانية وبعدين اكتب *إعادة إرسال*.`, `Wait ${err.retryAfterSeconds ?? 45} seconds, then type *resend*.`) };
+    }
+    await setSession(userId, SessionState.REG_PHONE_OTP, {});
+    return {
+      text: tr(
+        lang,
+        "معرفناش نبعت كود التحقّق دلوقتي. اكتب *إعادة إرسال* عشان نحاول تاني.",
+        "We couldn't send the verification code right now. Type *resend* to try again."
+      ),
+    };
+  }
+}
+
+export async function handleRegistrationOtpResend(userId: string, lang: Lang = "ar"): Promise<string> {
+  const r = await sendRegistrationOtp(userId, lang);
+  return r.text;
+}
+
+export async function handleRegistrationOtpInput(userId: string, raw: string, lang: Lang = "ar"): Promise<{ text: string; ok: boolean }> {
+  const code = raw.trim();
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { whatsappPhone: true } });
+  const phone = user?.whatsappPhone ?? "";
+  try {
+    await verifyPhoneCode(prisma, { phone, code });
+  } catch (err: any) {
+    const msg = err instanceof PhoneVerificationError ? err.message : tr(lang, "الكود غلط.", "Incorrect code.");
+    return { text: msg, ok: false };
+  }
+  // اتحقّق من الرقم فعليًا. دلوقتي نبدأ بيانات التسجيل (الجنس/المحافظة/
+  // الرقم القومي) — الفلو الأساسي، أو الـ fallback النصي لو مش متظبط.
+  const { sendRegDetailsFlow } = await import("./whatsapp.flows.js");
+  const u2 = await prisma.user.findUnique({ where: { id: userId }, select: { whatsappPhone: true } });
+  const sentFlow = await sendRegDetailsFlow(u2?.whatsappPhone ?? phone, userId).catch(() => false);
+  if (sentFlow) {
+    await setSession(userId, SessionState.REG_DETAILS_FLOW, {});
+    return { text: tr(lang, "\u2705 اتأكد رقمك. كمّل بياناتك في الفورم اللي فوق.", "\u2705 Number verified. Continue with the form above."), ok: true };
+  }
+  await setSession(userId, SessionState.REG_GENDER, {});
   return {
-    text: tr(
-      lang,
-      `تم تسجيل الاسم: ${v.fullName}\n\nرقم الواتساب:\n${user?.whatsappPhone ?? ""}\nده رقم الواتساب بتاعك؟`,
-      `Full name recorded: ${v.fullName}\n\nWhatsApp number:\n${user?.whatsappPhone ?? ""}\nIs this your WhatsApp number?`
-    ),
+    text: tr(lang, "\u2705 اتأكد رقمك.", "\u2705 Number verified.") + "\n\n" + genderPromptText(lang),
     ok: true,
   };
 }
 
-export async function confirmNumberYes(userId: string, lang: Lang = "ar"): Promise<string> {
-  await setSession(userId, SessionState.REG_ID_FRONT, {});
-  return tr(lang, "\u{1F4CE} من فضلك ابعت صورة واضحة لوش البطاقة الشخصية.", "\u{1F4CE} Please send a clear photo of the front of your ID card.");
+function genderPromptText(lang: Lang): string {
+  return tr(lang, "النوع؟", "Gender?");
 }
 
-export function numberNoText(lang: Lang = "ar"): string {
+export async function handleGenderButton(userId: string, choice: "male" | "female", lang: Lang = "ar"): Promise<string> {
+  await recordGender(prisma, userId, choice);
+  await setSession(userId, SessionState.REG_GOVERNORATE, {});
   return tr(
     lang,
-    "رقم الواتساب اللي بيوصلنا من الـ API الرسمي هو هوية القناة المعتمدة، فمينفعش نعمل حساب غير بنفس رقم الواتساب ده بالظبط. لو ده مش رقمك، كمّل من حساب الواتساب بتاعك إنت.",
-    "The WhatsApp identity received from the official API is the authoritative channel identity, so an account can only be created for this exact WhatsApp number. If this is not your number, please continue from your own WhatsApp account."
+    `اختار محافظتك — اكتب الرقم:\n\n${governoratesNumberedList(lang)}`,
+    `Choose your governorate — type the number:\n\n${governoratesNumberedList(lang)}`
   );
 }
-// Backward-compatible constant (Arabic default) kept for any stray imports.
-export const NUMBER_NO_TEXT = numberNoText("ar");
+
+export async function handleGovernorateInput(userId: string, raw: string, lang: Lang = "ar"): Promise<{ text: string; ok: boolean }> {
+  const v = validateGovernorateInput(raw, lang);
+  if (!v.ok) return { text: v.error, ok: false };
+  await recordGovernorate(prisma, userId, v.code);
+  await setSession(userId, SessionState.REG_NATIONAL_ID, {});
+  return { text: tr(lang, "اكتب الرقم القومي (14 رقم) زي ما هو في البطاقة.", "Enter your national ID number (14 digits) as printed on your ID."), ok: true };
+}
+
+export async function handleNationalIdInput(userId: string, raw: string, lang: Lang = "ar"): Promise<{ text: string; ok: boolean }> {
+  const v = validateNationalId(raw, lang);
+  if (!v.ok) return { text: v.error, ok: false };
+  try {
+    await recordNationalId(prisma, userId, v.digits, lang);
+  } catch (err: any) {
+    const msg = err instanceof RegDetailsError ? err.message : tr(lang, "معرفناش نسجّل الرقم القومي.", "Could not save the national ID.");
+    return { text: msg, ok: false };
+  }
+  await setSession(userId, SessionState.REG_ID_FRONT, {});
+  return { text: tr(lang, "\u{1F4CE} من فضلك ابعت صورة واضحة لوش البطاقة الشخصية.", "\u{1F4CE} Please send a clear photo of the front of your ID card."), ok: true };
+}
 
 // ID front/back and face video: metadata only. We intentionally never fetch or
 // store the media (acceptance criterion 7).
