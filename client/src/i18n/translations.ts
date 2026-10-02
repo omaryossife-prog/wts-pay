@@ -5,7 +5,43 @@
 // ---------------------------------------------------------------------------
 export type Lang = "ar" | "en";
 
-export const translations = {
+export interface TranslationShape {
+  nav: {
+    wallet: string; send: string; requests: string; activity: string;
+    referrals: string; profile: string; admin: string; logout: string;
+  };
+  common: {
+    loading: string; save: string; cancel: string; egp: string;
+    demoBannerTitle: string; demoBanner: string;
+  };
+  landing: {
+    tagline: string;
+    walletTitle: string; walletBody: string;
+    referralTitle: string; referralBody: string;
+    whatsappTitle: string; whatsappBody: string;
+    demoBanner: string;
+    createAccount: string; haveAccount: string;
+  };
+  login: {
+    subtitle: string; phone: string; password: string;
+    submit: string; submitting: string; noAccount: string; registerLink: string;
+  };
+  profile: {
+    title: string; name: string; phone: string; referralCode: string;
+    status: string; memberSince: string;
+    pinTitle: string; pinSetMsg: string; pinNotSetMsg: string;
+    accountPassword: string; newPin: string;
+    updatePin: string; createPin: string;
+    pinUpdated: string; pinCreated: string;
+    securityTitle: string; securityBody: string;
+    languageTitle: string; languageBody: string; languageSaved: string;
+  };
+  languagePicker: {
+    title: string; subtitle: string; arabic: string; english: string;
+  };
+}
+
+export const translations: Record<Lang, TranslationShape> = {
   ar: {
     nav: {
       wallet: "المحفظة", send: "تحويل", requests: "الطلبات", activity: "العمليات",
@@ -80,6 +116,4 @@ export const translations = {
       title: "Choose your language", subtitle: "اختار لغتك", arabic: "العربي", english: "English",
     },
   },
-} as const;
-
-export type TranslationShape = typeof translations["ar"];
+};
