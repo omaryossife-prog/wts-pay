@@ -388,3 +388,64 @@ can change it at any time — the two stay in sync because they read/write the s
 `User.language` (`supabase/migrations/0003_user_language.sql`) — run migrations as usual
 (Section 4). Existing rows default to `"ar"`, matching "every user before this had Arabic
 by default" from the spec.
+
+## 15. Registration hardening — OTP + details Flow + forgot password
+
+### WhatsApp OTP (تأكيد الشريحة)
+
+After the user types their full name, the bot immediately sends a 6-digit OTP by SMS to that
+same WhatsApp number (using the same SMSGate Android gateway already in place). The user types
+the code in chat. This proves the physical SIM is in their hand — not just that WhatsApp is
+open on some device (which could be an old phone or a cloned session).
+
+* Resend: type "إعادة إرسال" or "resend" — same rate limits as the website OTP (5 min expiry,
+  45 s cooldown, 5 SMS/day/number, 10 attempts/day/IP).
+* `allowUserId` was added to `SendCodeInput` so the existing unverified user row (created at
+  "Start") does not trigger the "number already taken" guard.
+
+### Registration-details WhatsApp Flow
+
+`server/flows/wts-registration-details.flow.json` — a new Flow that collects:
+- **Gender** — RadioButtonsGroup (Male / Female)
+- **Governorate** — Dropdown, all 27 Egyptian governorates (codes in `server/src/services/governorates.ts`)
+- **National ID** — TextInput, 14-digit validation on the server (century marker 2 or 3)
+
+The Flow is sent right after the OTP succeeds. To activate it:
+1. In Meta Business Manager → WhatsApp → Flows → Create, upload `wts-registration-details.flow.json`.
+2. Set the Webhook for data-exchange to `https://your-worker.workers.dev/api/whatsapp/flows/registration-details`.
+3. Copy the Flow ID and add the secret: `npx wrangler secret put WHATSAPP_REG_DETAILS_FLOW_ID`.
+
+Until the Flow ID is configured, the bot falls back to a fully documented chat sequence
+(gender buttons → numbered governorate list → national ID text input) — no breakage.
+
+After the Flow closes, the bot continues in chat as before: ID photo front → ID photo back → face video.
+
+### National ID storage
+
+The full number is **never stored**. Only:
+- `nationalIdEnc` — HMAC-SHA256 hash (keyed on `config.encryptionKey`). Unique index prevents
+  the same card registering twice.
+- `nationalIdLast6` — last 6 digits in the clear, used only for "forgot password" identity check.
+
+### Forgot password (website)
+
+`/forgot-password` — three steps:
+1. Phone number + last 6 digits of national ID → identity verified → OTP sent by SMS.
+2. User enters OTP → server issues a short-lived `resetToken` (JWT, purpose `"password-reset"`, 15 min).
+3. User enters new password → `POST /api/auth/reset/complete` validates the token and updates `passwordHash`.
+
+API endpoints: `POST /api/auth/reset/send`, `/reset/verify`, `/reset/complete`.
+The "Forgot password?" link appears below the sign-in button on the Login page.
+
+### Database migration
+
+Run in Supabase SQL Editor (after `0003_user_language.sql`):
+```sql
+alter table "users"
+  add column if not exists "gender" text,
+  add column if not exists "governorate" text,
+  add column if not exists "nationalIdEnc" text,
+  add column if not exists "nationalIdLast6" text;
+
+create unique index if not exists "users_nationalIdEnc_key" on "users" ("nationalIdEnc");
+```
