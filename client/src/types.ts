@@ -73,6 +73,9 @@ export interface PendingVerification {
   faceVideoReceivedAt: string | null;
   createdAt: string;
   whatsappConversationUrl: string | null;
+  gender: "male" | "female" | null;
+  governorate: string | null;
+  nationalIdLast6: string | null;
 }
 
 export interface AdminStats {
