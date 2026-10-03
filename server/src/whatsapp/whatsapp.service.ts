@@ -153,8 +153,8 @@ export async function handleNameInput(userId: string, raw: string, lang: Lang = 
 }
 
 // بيبعت كود SMS لرقم المستخدم (نفس نظام SMSGate المستخدم في تسجيل الموقع)
-// ويضبط الجلسة على استنى الكود. مُصدَّرة لوحدها عشان تُستخدم من "إعادة الإرسال" برضو.
-async function sendRegistrationOtp(userId: string, lang: Lang): Promise<{ text: string }> {
+// ويضبط الجلسة على استنى الكود. مُصدَّرة لوحدها عشان تُستخدم من "إعادة الإرسال" والبدء المباشر.
+export async function sendRegistrationOtp(userId: string, lang: Lang): Promise<{ text: string }> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { whatsappPhone: true } });
   const phone = user?.whatsappPhone ?? "";
   try {
@@ -198,18 +198,21 @@ export async function handleRegistrationOtpInput(userId: string, raw: string, la
     const msg = err instanceof PhoneVerificationError ? err.message : tr(lang, "الكود غلط.", "Incorrect code.");
     return { text: msg, ok: false };
   }
-  // اتحقّق من الرقم فعليًا. دلوقتي نبدأ بيانات التسجيل (الجنس/المحافظة/
-  // الرقم القومي) — الفلو الأساسي، أو الـ fallback النصي لو مش متظبط.
+  // اتحقّق من الرقم فعليًا. دلوقتي نبدأ فلو البيانات (الاسم/الجنس/المحافظة/الرقم القومي).
   const { sendRegDetailsFlow } = await import("./whatsapp.flows.js");
   const u2 = await prisma.user.findUnique({ where: { id: userId }, select: { whatsappPhone: true } });
   const sentFlow = await sendRegDetailsFlow(u2?.whatsappPhone ?? phone, userId).catch(() => false);
   if (sentFlow) {
     await setSession(userId, SessionState.REG_DETAILS_FLOW, {});
-    return { text: tr(lang, "\u2705 اتأكد رقمك. كمّل بياناتك في الفورم اللي فوق.", "\u2705 Number verified. Continue with the form above."), ok: true };
+    return {
+      text: tr(lang, "✅ اتأكد رقمك. كمّل بياناتك في الفورم اللي فوق (الاسم، الجنس، المحافظة، الرقم القومي).", "✅ Number verified. Fill in your details in the form above (name, gender, governorate, national ID)."),
+      ok: true,
+    };
   }
-  await setSession(userId, SessionState.REG_GENDER, {});
+  // Fallback: لو الفلو مش متظبط — نطلب الاسم في الشات
+  await setSession(userId, SessionState.REG_NAME, {});
   return {
-    text: tr(lang, "\u2705 اتأكد رقمك.", "\u2705 Number verified.") + "\n\n" + genderPromptText(lang),
+    text: tr(lang, "✅ اتأكد رقمك.\n\n" + "اكتب اسمك الرباعي بالكامل زي ما هو في البطاقة.\nمثال: أحمد محمد علي حسن", "✅ Number verified.\n\nEnter your full four-part name exactly as on your ID.\nExample: Ahmed Mohamed Ali Hassan"),
     ok: true,
   };
 }

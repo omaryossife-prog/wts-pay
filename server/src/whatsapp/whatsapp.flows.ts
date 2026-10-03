@@ -190,14 +190,20 @@ export async function handleRegDetailsFlowDataExchange(body: any): Promise<any> 
 
   if (!userId) return send("DETAILS", { error: tr(lang, "تعذر التحقق من هوية المستخدم.", "Could not verify your identity.") });
 
-  if (screen === "DETAILS" && (flowData?.action === "INIT" || data.op === "submit_details")) {
-    if (flowData?.action === "INIT") {
-      return send("DETAILS", { error: "" });
-    }
+  if (flowData?.action === "INIT") return send("DETAILS", { error: "" });
+
+  if (screen === "DETAILS" && data.op === "submit_details") {
+    const rawName = String(data.full_name ?? "").trim();
     const gender = String(data.gender ?? "");
     const governorateCode = String(data.governorate ?? "");
     const rawNationalId = String(data.national_id ?? "");
 
+    // validate name
+    const { validateFourPartName, recordFullName } = await import("../services/registration.service.js");
+    const nameCheck = validateFourPartName(rawName, lang);
+    if (!nameCheck.ok || !nameCheck.fullName) {
+      return send("DETAILS", { error: nameCheck.error ?? tr(lang, "الاسم غير صحيح.", "Invalid name.") });
+    }
     if (gender !== "male" && gender !== "female") {
       return send("DETAILS", { error: tr(lang, "اختار النوع.", "Please choose a gender.") });
     }
@@ -210,6 +216,7 @@ export async function handleRegDetailsFlowDataExchange(body: any): Promise<any> 
     }
 
     try {
+      await recordFullName(prisma, userId, nameCheck.fullName);
       await recordGender(prisma, userId, gender as "male" | "female");
       await recordGovernorate(prisma, userId, governorateCode);
       await recordNationalId(prisma, userId, idCheck.digits, lang);
@@ -218,18 +225,113 @@ export async function handleRegDetailsFlowDataExchange(body: any): Promise<any> 
       return send("DETAILS", { error: msg });
     }
 
-    // التالي في المحادثة العادية: صورة وش البطاقة (مش جوه الفورم ده).
-    await setSession(userId, SessionState.REG_ID_FRONT, {});
+    // بعد الفلو ده: نبعت فلو الصور (أو fallback رسالة عادية لو مش متظبط)
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { whatsappPhone: true } });
+    const waTo = (user?.whatsappPhone ?? "").replace("+", "");
+    if (waTo) {
+      setImmediate(async () => {
+        const sent = await sendRegPhotosFlow(waTo, userId).catch(() => false);
+        if (!sent) {
+          await setSession(userId, SessionState.REG_ID_FRONT, {});
+          const { sendTextMessage } = await import("./whatsapp.client.js");
+          await sendTextMessage(waTo, tr(lang, "📎 من فضلك ابعت صورة واضحة لوش البطاقة الشخصية.", "📎 Please send a clear photo of the front of your ID card.")).catch(() => {});
+        }
+      });
+    }
+
     return send("DONE", {
       message: tr(
         lang,
-        "تم حفظ بياناتك. ارجع للمحادثة وابعت صورة واضحة لوش البطاقة الشخصية.",
-        "Your details were saved. Go back to the chat and send a clear photo of the front of your ID card."
+        "✅ تم حفظ بياناتك. ارجع للمحادثة وكمّل بصور البطاقة.",
+        "✅ Your details were saved. Go back to the chat to continue with your ID photos."
       ),
     });
   }
 
   return send("DETAILS", { error: tr(lang, "مسار غير معروف.", "Unknown step.") });
+}
+
+// ── Registration Photos Flow (وش وضهر البطاقة) ──────────────────────────
+export async function sendRegPhotosFlow(to: string, userId: string): Promise<boolean> {
+  const flowId = process.env.WHATSAPP_REG_PHOTOS_FLOW_ID;
+  if (!flowId) return false;
+  const lang = await langFor(userId);
+  const { sendInteractiveMessage } = await import("./whatsapp.client.js");
+  const { flowMessagePayload } = await import("./whatsapp.templates.js");
+  const r = await sendInteractiveMessage(
+    flowMessagePayload(
+      to,
+      flowId,
+      userId,
+      tr(lang, "ابعت صور البطاقة الشخصية (وش وضهر) عشان نكمّل التسجيل.", "Send photos of your ID card (front and back) to complete registration."),
+      tr(lang, "📸 ابعت صور البطاقة", "📸 Send ID photos")
+    )
+  );
+  return r.ok;
+}
+
+// POST /api/whatsapp/flows/registration-photos
+export async function handleRegPhotosFlowDataExchange(body: any): Promise<any> {
+  if (body?.action === "ping") return { status: "active", data: {} };
+  const parsed = decryptFlowBody(body);
+  if (!parsed) return { status: "failed", data: { message: "Flow endpoint not configured" } };
+  const { flowData, aesKey, iv } = parsed;
+  if (flowData?.action === "ping") return { status: "active", data: {} };
+
+  const version = flowData?.version ?? "7.2";
+  const screen = String(flowData?.screen ?? "PHOTOS");
+  const data = flowData?.data ?? {};
+  const userId = String(flowData?.flow_token ?? "");
+  const send = (screenName: string, screenData: Record<string, unknown>) => encryptFlowResponse(aesKey, iv, version, screenName, screenData);
+  const lang = userId ? await langFor(userId) : "ar";
+
+  if (!userId) return send("PHOTOS", { error: tr(lang, "تعذر التحقق من هوية المستخدم.", "Could not verify your identity.") });
+  if (flowData?.action === "INIT") return send("PHOTOS", { error: "" });
+
+  if (screen === "PHOTOS" && data.op === "submit_photos") {
+    // PhotoPicker بيبعتنا Media IDs — مش الصور نفسها.
+    // بنسجّل فقط إن الصور اتبعتت (مش بنخزّن المحتوى).
+    // id_photos بيجي كـ array من Media IDs (واحد لكل صورة).
+    // بنتأكد إن المستخدم رفع الصورتين (وش وضهر) زي ما طلب الفلو.
+    const photos = data.id_photos;
+    const photoCount = Array.isArray(photos) ? photos.length : photos ? 1 : 0;
+
+    if (photoCount < 2) {
+      return send("PHOTOS", { error: tr(lang, "لازم تبعت صورتين: وش البطاقة وضهرها.", "Please upload both photos: front and back of your ID.") });
+    }
+
+    const { recordIdSubmitted } = await import("../services/registration.service.js");
+    // بنستخدم recordIdSubmitted لإشارة إن الصور وصلت — الميديا بتفضل على سيرفرات ميتا
+    await recordIdSubmitted(prisma, userId);
+
+    // الخطوة التالية في الشات: طلب الفيديو
+    await setSession(userId, SessionState.REG_FACE_VIDEO, {});
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { whatsappPhone: true } });
+    const waTo = (user?.whatsappPhone ?? "").replace("+", "");
+    if (waTo) {
+      setImmediate(async () => {
+        const { sendTextMessage } = await import("./whatsapp.client.js");
+        await sendTextMessage(
+          waTo,
+          tr(
+            lang,
+            "🎥 آخر خطوة في التحقق!\nابعت فيديو قصير لوشك (5-10 ثواني) بإضاءة كويسة.",
+            "🎥 Final verification step!\nSend a short video of your face (5–10 seconds) with good lighting."
+          )
+        ).catch(() => {});
+      });
+    }
+
+    return send("DONE", {
+      message: tr(
+        lang,
+        "✅ تم استلام صور البطاقة. ارجع للمحادثة وابعت فيديو قصير لوشك.",
+        "✅ ID photos received. Go back to the chat and send a short video of your face."
+      ),
+    });
+  }
+
+  return send("PHOTOS", { error: tr(lang, "مسار غير معروف.", "Unknown step.") });
 }
 
 // ── Send Money Flow — data collection ONLY. Ends by triggering the

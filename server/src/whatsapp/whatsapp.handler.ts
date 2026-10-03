@@ -18,13 +18,13 @@ import {
   ACTIONS, mainMenuRows, greetingText, startButton,
   LANGUAGE_PROMPT_TEXT, LANGUAGE_BUTTONS, languageSavedText,
 } from "./whatsapp.templates.js";
-import { sendPinFlow, sendSendMoneyFlow, sendConfirmPinFlow, sendWalletFlow, sendRegDetailsFlow } from "./whatsapp.flows.js";
+import { sendPinFlow, sendSendMoneyFlow, sendConfirmPinFlow, sendWalletFlow, sendRegDetailsFlow, sendRegPhotosFlow } from "./whatsapp.flows.js";
 import {
   SessionState, getUserByWaIdentity, getSession, setSession,
   maintenanceActive, getUserLanguage, setUserLanguage,
-  startRegistration, handleNameInput,
+  startRegistration, sendRegistrationOtp,
+  handleNameInput,
   handleRegistrationOtpInput, handleRegistrationOtpResend,
-  handleGenderButton, handleGovernorateInput, handleNationalIdInput,
   handleIdFront, handleIdBack, handleFaceVideo,
   handlePinCreateInput, handlePinConfirmInput,
   getBalanceText, getTransactionsText, getReferralText, getAccountText, helpText,
@@ -182,24 +182,24 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
   // ---------- Registration conversation ----------
   if (user.verificationStatus === "UNVERIFIED") {
     if (replyId === ACTIONS.CREATE_ACCOUNT || replyId === ACTIONS.START) {
-      await setSession(user.id, SessionState.REG_NAME, {});
-      await sendTextMessage(to, fullNameHint(lang));
+      // أول خطوة: إثبات ملكية الشريحة بكود SMS مباشرة
+      const r = await sendRegistrationOtp(user.id, lang);
+      await sendTextMessage(to, r.text);
       return;
     }
     switch (session.state) {
-      case SessionState.REG_NAME: {
-        const r = await handleNameInput(user.id, text, lang);
-        // handleNameInput ينجح ببعت كود SMS فورًا ويحط الجلسة على
-        // REG_PHONE_OTP (ده إثبات الشريحة الفعلي — مش زرار "آه/لأ").
-        await sendTextMessage(to, r.text);
-        return;
-      }
       case SessionState.REG_PHONE_OTP: {
         if (["resend", "إعادة إرسال", "اعادة ارسال", "إعاده إرسال"].includes(lowerText)) {
           await sendTextMessage(to, await handleRegistrationOtpResend(user.id, lang));
           return;
         }
         const r = await handleRegistrationOtpInput(user.id, text, lang);
+        await sendTextMessage(to, r.text);
+        return;
+      }
+      case SessionState.REG_NAME: {
+        // Fallback لما فلو البيانات مش متظبط — نطلب الاسم في الشات
+        const r = await handleNameInput(user.id, text, lang);
         await sendTextMessage(to, r.text);
         return;
       }
@@ -233,10 +233,15 @@ export async function handleIncomingMessage(msg: IncomingMessage): Promise<void>
       }
       case SessionState.REG_ID_FRONT: {
         if (msg.type === "image") {
-          // Metadata only - the photo itself stays in WhatsApp (media policy).
+          // Metadata only - the photo itself stays in WhatsApp / Meta servers.
           await sendTextMessage(to, await handleIdFront(user.id, lang));
         } else {
-          await sendTextMessage(to, tr(lang, "\u{1F4CE} من فضلك ابعت صورة واضحة لوش البطاقة الشخصية.", "\u{1F4CE} Please send a clear photo of the front of your ID card."));
+          // لو وصلنا هنا ومفيش صورة: ممكن يكون الفلو بعت المستخدم هنا بعد ما خلّص
+          // فلو البيانات — نحاول نبعت فلو الصور لو مش متظبط بالفعل.
+          const sentPhotosFlow = await sendRegPhotosFlow(to, user.id).catch(() => false);
+          if (!sentPhotosFlow) {
+            await sendTextMessage(to, tr(lang, "📎 من فضلك ابعت صورة واضحة لوش البطاقة الشخصية.", "📎 Please send a clear photo of the front of your ID card."));
+          }
         }
         return;
       }
