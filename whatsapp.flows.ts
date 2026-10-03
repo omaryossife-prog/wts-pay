@@ -291,11 +291,13 @@ export async function handleRegPhotosFlowDataExchange(body: any): Promise<any> {
   if (screen === "PHOTOS" && data.op === "submit_photos") {
     // PhotoPicker بيبعتنا Media IDs — مش الصور نفسها.
     // بنسجّل فقط إن الصور اتبعتت (مش بنخزّن المحتوى).
-    const frontId = data.id_front ? String(data.id_front) : null;
-    const backId = data.id_back ? String(data.id_back) : null;
+    // id_photos بيجي كـ array من Media IDs (واحد لكل صورة).
+    // بنتأكد إن المستخدم رفع الصورتين (وش وضهر) زي ما طلب الفلو.
+    const photos = data.id_photos;
+    const photoCount = Array.isArray(photos) ? photos.length : photos ? 1 : 0;
 
-    if (!frontId || !backId) {
-      return send("PHOTOS", { error: tr(lang, "لازم تبعت صورة وش وصورة ضهر البطاقة.", "Please send both front and back photos of your ID.") });
+    if (photoCount < 2) {
+      return send("PHOTOS", { error: tr(lang, "لازم تبعت صورتين: وش البطاقة وضهرها.", "Please upload both photos: front and back of your ID.") });
     }
 
     const { recordIdSubmitted } = await import("../services/registration.service.js");
