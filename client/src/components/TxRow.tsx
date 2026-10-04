@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Transaction } from "../types";
 import { api } from "../services/api";
 import { useLang } from "../i18n/LanguageContext";
+import { txType, txStatus } from "../i18n/enums";
 
 const fmt = (n: number, egp: string) => `${n} ${egp}`;
 
@@ -25,7 +26,8 @@ export default function TxRow({ tx, viewerId }: { tx: Transaction; viewerId: str
     finally { setBusy(false); }
   };
 
-  const typeLabel = tx.type.replace(/_/g, " ").toLowerCase();
+  const typeLabel = txType(t, tx.type);
+  const statusLabel = txStatus(t, tx.status);
   const statusCls = tx.status === "COMPLETED" ? "green" : tx.status === "REVERSED" ? "amber" : "gray";
 
   return (
@@ -54,7 +56,7 @@ export default function TxRow({ tx, viewerId }: { tx: Transaction; viewerId: str
       <div className={cls} style={{ textAlign: "right" }}>
         {sign}{fmt(outgoing ? tx.totalDebit : tx.amount, t.common.egp)}
         <div className="meta" style={{ fontWeight: 400 }}>
-          <span className={`badge ${statusCls}`}>{tx.status}</span>
+          <span className={`badge ${statusCls}`}>{statusLabel}</span>
         </div>
       </div>
     </div>

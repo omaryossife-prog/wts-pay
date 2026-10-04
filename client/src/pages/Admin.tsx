@@ -3,6 +3,7 @@ import { api } from "../services/api";
 import StatCard from "../components/StatCard";
 import type { AdminStats, ConfigBundle, Transaction, PendingVerification } from "../types";
 import { useLang } from "../i18n/LanguageContext";
+import { txType, txStatus, fraudStatus, verifStatus } from "../i18n/enums";
 
 type Tab = "overview" | "verifications" | "users" | "config" | "audit" | "transactions" | "fraud";
 
@@ -162,9 +163,9 @@ function Users() {
                 <div className="meta">{usr.phone} · {usr.demoBalance} {t.common.egp}</div>
               </div>
               <div style={{ textAlign: "right" }}>
-                <span className={`badge ${usr.status === "ACTIVE" ? "green" : "red"}`}>{usr.status}</span>
+                <span className={`badge ${usr.status === "ACTIVE" ? "green" : "red"}`}>{usr.status === "ACTIVE" ? (t.admin.users.active) : (t.admin.users.frozen)}</span>
                 {usr.verificationStatus && usr.verificationStatus !== "VERIFIED" &&
-                  <div><span className="badge amber">{usr.verificationStatus.replace(/_/g, " ")}</span></div>}
+                  <div><span className="badge amber">{verifStatus(t, usr.verificationStatus)}</span></div>}
               </div>
             </div>
           ))}
@@ -185,7 +186,7 @@ function Users() {
             <div className="list-row"><span>WhatsApp</span><strong>{detail.user.whatsappPhone ?? "-"}</strong></div>
             <div className="list-row"><span>{u.balance}</span><strong>{detail.user.demoBalance} {t.common.egp}</strong></div>
             <div className="list-row"><span>{u.verif}</span>
-              <span className={`badge ${detail.user.verificationStatus === "VERIFIED" ? "green" : "amber"}`}>{detail.user.verificationStatus}</span></div>
+              <span className={`badge ${detail.user.verificationStatus === "VERIFIED" ? "green" : "amber"}`}>{verifStatus(t, detail.user.verificationStatus)}</span></div>
             <div className="list-row"><span>{u.pin}</span>
               <strong>{detail.user.pinHash ? u.pinSet : u.pinNotSet} {detail.user.pinLockedUntil && new Date(detail.user.pinLockedUntil) > new Date() ? u.locked : ""}</strong></div>
             <div className="list-row"><span>{u.transfers}</span>
@@ -241,7 +242,7 @@ function Users() {
               return (
                 <div className="list-row" key={tx.id}>
                   <div>
-                    <div style={{ fontSize: 14 }}>{tx.type.replace(/_/g, " ")} — {tx.amount} {t.common.egp}</div>
+                    <div style={{ fontSize: 14 }}>{txType(t, tx.type)} — {tx.amount} {t.common.egp}</div>
                     <div className="meta">
                       {tx.description ?? ""}
                       {before != null && after != null && ` · ${before} → ${after}`}
@@ -249,7 +250,7 @@ function Users() {
                     </div>
                     <div className="meta" style={{ opacity: 0.7 }}>Ref: {tx.reference}</div>
                   </div>
-                  <span className={`badge ${tx.status === "COMPLETED" ? "green" : "amber"}`}>{tx.status}</span>
+                  <span className={`badge ${tx.status === "COMPLETED" ? "green" : "amber"}`}>{txStatus(t, tx.status)}</span>
                 </div>
               );
             })}
@@ -260,7 +261,7 @@ function Users() {
               <div className="list-row" key={r.id} style={{ flexDirection: "column", alignItems: "stretch", gap: 2 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span>{u.report}{r.reportNumber}</span>
-                  <span className={`badge ${r.status === "CONFIRMED" ? "red" : r.status === "DISMISSED" ? "green" : "amber"}`}>{r.status}</span>
+                  <span className={`badge ${r.status === "CONFIRMED" ? "red" : r.status === "DISMISSED" ? "green" : "amber"}`}>{fraudStatus(t, r.status)}</span>
                 </div>
                 <span className="meta">
                   {u.filed} {new Date(r.createdAt).toLocaleString()}
@@ -397,14 +398,14 @@ function TransactionsTab() {
             <tr key={item.id}>
               <td className="meta">{item.reference}</td>
               <td>{new Date(item.createdAt).toLocaleString()}</td>
-              <td>{item.type.replace(/_/g, " ")}</td>
+              <td>{txType(t, item.type)}</td>
               <td>{item.sender?.phone ?? "—"}</td>
               <td className="meta">{item.senderId ? `${item.senderBalanceBefore ?? item.balanceBefore ?? "—"}→${item.senderBalanceAfter ?? item.balanceAfter ?? "—"}` : "—"}</td>
               <td>{item.receiver?.phone ?? "—"}</td>
               <td className="meta">{item.receiverId ? `${item.receiverBalanceBefore ?? item.balanceBefore ?? "—"}→${item.receiverBalanceAfter ?? item.balanceAfter ?? "—"}` : "—"}</td>
               <td>{item.amount}</td>
               <td>{item.fee}</td>
-              <td><span className={`badge ${item.status === "COMPLETED" ? "green" : "amber"}`}>{item.status}</span></td>
+              <td><span className={`badge ${item.status === "COMPLETED" ? "green" : "amber"}`}>{txStatus(t, item.status)}</span></td>
             </tr>
           ))}
         </tbody>
@@ -449,7 +450,7 @@ function FraudReports() {
       <div className="row" style={{ marginBottom: 12 }}>
         {(["PENDING", "CONFIRMED", "DISMISSED", ""] as const).map((s) => (
           <button key={s || "all"} className={`btn small ${statusFilter === s ? "" : "ghost"}`} onClick={() => setStatusFilter(s)}>
-            {s || f.all}
+            {s ? fraudStatus(t, s) : f.all}
           </button>
         ))}
       </div>
@@ -460,7 +461,7 @@ function FraudReports() {
         <div key={r.id} className="list-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6, borderBottom: "1px solid #eee", paddingBottom: 12, marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <strong>{f.reportOn} {r.reportedUser?.username} ({r.reportedUser?.phone})</strong>
-            <span className={`badge ${r.status === "CONFIRMED" ? "red" : r.status === "DISMISSED" ? "green" : "amber"}`}>{r.status}</span>
+            <span className={`badge ${r.status === "CONFIRMED" ? "red" : r.status === "DISMISSED" ? "green" : "amber"}`}>{fraudStatus(t, r.status)}</span>
           </div>
           <div className="meta">
             {f.transaction}: {r.transaction?.amount} {t.common.egp} · {new Date(r.transaction?.createdAt).toLocaleString()} ·
