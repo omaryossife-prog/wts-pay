@@ -214,6 +214,20 @@
         "type": "SingleColumnLayout",
         "children": [
           {
+            "type": "Image",
+            "src": "https://wts-pay-1.pages.dev/success.png",
+            "height": 120,
+            "scale-type": "contain",
+            "aspect-ratio": 1
+          },
+          {
+            "type": "Image",
+            "src": "https://wts-pay-1.pages.dev/success.png",
+            "height": 120,
+            "scale-type": "contain",
+            "aspect-ratio": 1
+          },
+          {
             "type": "TextHeading",
             "text": "✅ تم حفظ البيانات"
           },

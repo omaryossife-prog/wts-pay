@@ -115,7 +115,7 @@ function Verifications() {
 }
 
 function Users() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const u = t.admin.users;
   const [q, setQ] = useState("");
   const [users, setUsers] = useState<any[]>([]);
@@ -222,7 +222,7 @@ function Users() {
             {preview && (
               <div className="demo-banner">
                 {adjAmount > 0 ? u.adding : u.deducting} {Math.abs(adjAmount)} {t.common.egp}<br />
-                {u.current}: {preview.before} → {u.newBal}: {preview.after} {t.common.egp}<br />
+                {u.current}: {preview.before} {lang === "ar" ? "←" : "→"} {u.newBal}: {preview.after} {t.common.egp}<br />
                 {u.reasonLabel}: {adjustReason || "-"}
               </div>
             )}
@@ -245,7 +245,7 @@ function Users() {
                     <div style={{ fontSize: 14 }}>{txType(t, tx.type)} — {tx.amount} {t.common.egp}</div>
                     <div className="meta">
                       {tx.description ?? ""}
-                      {before != null && after != null && ` · ${before} → ${after}`}
+                      {before != null && after != null && ` · ${before} ${lang === "ar" ? "←" : "→"} ${after}`}
                       {" · "}{new Date(tx.createdAt).toLocaleString()}
                     </div>
                     <div className="meta" style={{ opacity: 0.7 }}>Ref: {tx.reference}</div>
@@ -377,7 +377,7 @@ function Audit() {
 }
 
 function TransactionsTab() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tx = t.admin.txTab;
   const [items, setItems] = useState<Transaction[]>([]);
   const [q, setQ] = useState("");
@@ -400,9 +400,9 @@ function TransactionsTab() {
               <td>{new Date(item.createdAt).toLocaleString()}</td>
               <td>{txType(t, item.type)}</td>
               <td>{item.sender?.phone ?? "—"}</td>
-              <td className="meta">{item.senderId ? `${item.senderBalanceBefore ?? item.balanceBefore ?? "—"}→${item.senderBalanceAfter ?? item.balanceAfter ?? "—"}` : "—"}</td>
+              <td className="meta">{item.senderId ? `${item.senderBalanceBefore ?? item.balanceBefore ?? "—"}${lang === "ar" ? "←" : "→"}${item.senderBalanceAfter ?? item.balanceAfter ?? "—"}` : "—"}</td>
               <td>{item.receiver?.phone ?? "—"}</td>
-              <td className="meta">{item.receiverId ? `${item.receiverBalanceBefore ?? item.balanceBefore ?? "—"}→${item.receiverBalanceAfter ?? item.balanceAfter ?? "—"}` : "—"}</td>
+              <td className="meta">{item.receiverId ? `${item.receiverBalanceBefore ?? item.balanceBefore ?? "—"}${lang === "ar" ? "←" : "→"}${item.receiverBalanceAfter ?? item.balanceAfter ?? "—"}` : "—"}</td>
               <td>{item.amount}</td>
               <td>{item.fee}</td>
               <td><span className={`badge ${item.status === "COMPLETED" ? "green" : "amber"}`}>{txStatus(t, item.status)}</span></td>

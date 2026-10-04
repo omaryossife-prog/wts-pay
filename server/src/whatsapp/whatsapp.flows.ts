@@ -89,15 +89,20 @@ function encryptFlowResponse(aesKey: Buffer, iv: Buffer, version: string, screen
   return { encrypted_response: combined.toString("base64"), aes_key_buffer: "unused" };
 }
 
+const PAGES_BASE = "https://wts-pay-1.pages.dev";
+
 function resultScreenData(r: WtsActionResponse, lang: Lang) {
   return {
-    title: r.success ? tr(lang, "\u2705 تمت العملية بنجاح", "\u2705 Operation successful") : tr(lang, "\u274C لم يتم تنفيذ العملية", "\u274C The operation was not completed"),
+    title: r.success ? tr(lang, "تمت العملية بنجاح", "Operation successful") : tr(lang, "لم يتم تنفيذ العملية", "The operation was not completed"),
     message: r.message,
     transaction_id: r.transactionId ?? "",
     amount_label: r.amount !== undefined ? tr(lang, `${r.amount} جنيه`, `${r.amount} EGP`) : "",
     fee_label: r.fee !== undefined ? tr(lang, `${r.fee} جنيه`, `${r.fee} EGP`) : "",
     total_label: r.total !== undefined ? tr(lang, `${r.total} جنيه`, `${r.total} EGP`) : "",
     balance_label: r.balanceAfter !== undefined ? tr(lang, `${r.balanceAfter} جنيه`, `${r.balanceAfter} EGP`) : "",
+    success_image: r.success
+      ? `${PAGES_BASE}/success.png`
+      : `${PAGES_BASE}/error.png`,
   };
 }
 

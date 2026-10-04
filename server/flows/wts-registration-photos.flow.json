@@ -2,7 +2,9 @@
   "version": "7.2",
   "data_api_version": "3.0",
   "routing_model": {
-    "PHOTOS": ["DONE"],
+    "PHOTOS": [
+      "DONE"
+    ],
     "DONE": []
   },
   "screens": [
@@ -11,7 +13,10 @@
       "title": "صور البطاقة",
       "terminal": false,
       "data": {
-        "error": { "type": "string", "__example__": "" }
+        "error": {
+          "type": "string",
+          "__example__": ""
+        }
       },
       "layout": {
         "type": "SingleColumnLayout",
@@ -20,9 +25,18 @@
             "type": "Form",
             "name": "f",
             "children": [
-              { "type": "TextHeading", "text": "صور البطاقة الشخصية" },
-              { "type": "TextBody", "text": "ارفع صورة وش البطاقة وصورة ضهر البطاقة. الصور هتوصل لفريقنا للمراجعة فقط ولن تُخزَّن في قاعدة البيانات." },
-              { "type": "TextBody", "text": "${data.error}" },
+              {
+                "type": "TextHeading",
+                "text": "صور البطاقة الشخصية"
+              },
+              {
+                "type": "TextBody",
+                "text": "ارفع صورة وش البطاقة وصورة ضهر البطاقة. الصور هتوصل لفريقنا للمراجعة فقط ولن تُخزَّن في قاعدة البيانات."
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.error}"
+              },
               {
                 "type": "PhotoPicker",
                 "name": "id_photos",
@@ -53,17 +67,43 @@
       "title": "تم",
       "terminal": true,
       "data": {
-        "message": { "type": "string", "__example__": "تم استلام الصور." }
+        "message": {
+          "type": "string",
+          "__example__": "تم استلام الصور."
+        }
       },
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
-          { "type": "TextHeading", "text": "✅ تم استلام الصور" },
-          { "type": "TextBody", "text": "${data.message}" },
+          {
+            "type": "Image",
+            "src": "https://wts-pay-1.pages.dev/success.png",
+            "height": 120,
+            "scale-type": "contain",
+            "aspect-ratio": 1
+          },
+          {
+            "type": "Image",
+            "src": "https://wts-pay-1.pages.dev/success.png",
+            "height": 120,
+            "scale-type": "contain",
+            "aspect-ratio": 1
+          },
+          {
+            "type": "TextHeading",
+            "text": "✅ تم استلام الصور"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.message}"
+          },
           {
             "type": "Footer",
             "label": "إغلاق",
-            "on-click-action": { "name": "complete", "payload": {} }
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
           }
         ]
       }
